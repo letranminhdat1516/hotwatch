@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"hotwatch/model"
@@ -19,12 +20,23 @@ const (
 	lsofTimeout = 3 * time.Second
 )
 
-// portCache holds the last lsof result so the 2 s process poll does not spawn
-// lsof every time.
+const (
+	portsMaxAge    = 60 * time.Second // a last good map older than this is dropped
+	portsFirstWait = 500 * time.Millisecond
+)
+
+// portCache holds the last good lsof result. Refreshes run in one background
+// goroutine at a time so Processes() never waits for lsof (except the very
+// first call, bounded by portsFirstWait). All fields are guarded by mu.
 type portCache struct {
-	at    time.Time
-	ports map[int32][]model.Port
-	ok    bool
+	mu       sync.Mutex
+	ports    map[int32][]model.Port
+	goodAt   time.Time
+	haveGood bool
+	lastTry  time.Time
+	tried    bool
+	running  bool
+	first    chan struct{} // closed when the first refresh finishes
 }
 
 // runLsof lists listening TCP sockets and UDP sockets. lsof only sees
@@ -35,25 +47,63 @@ func runLsof(ctx context.Context) ([]byte, error) {
 	return exec.CommandContext(ctx, "lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-iUDP", "-F", "pcnPt").Output()
 }
 
-// listeningPorts returns pid -> ports, cached for portsTTL. A missing lsof or
-// a failure yields an empty map; it never fails the process list.
-func (c *collector) listeningPorts(ctx context.Context, now time.Time) map[int32][]model.Port {
-	if c.ports.ok && now.Sub(c.ports.at) < portsTTL && now.Sub(c.ports.at) >= 0 {
-		return c.ports.ports
+// listeningPorts returns pid -> ports from the last good lsof run. It starts a
+// background refresh when the last attempt is older than portsTTL and none is
+// running; the refresh uses its own context, never the caller's. A failed
+// refresh keeps the previous good map (dropped only after portsMaxAge) and is
+// retried after the normal interval. Safe for concurrent use.
+func (c *collector) listeningPorts(_ context.Context, now time.Time) map[int32][]model.Port {
+	pc := &c.ports
+	pc.mu.Lock()
+	if pc.first == nil {
+		pc.first = make(chan struct{})
 	}
+	first := pc.first
+	if !pc.running && (!pc.tried || now.Sub(pc.lastTry) >= portsTTL || now.Before(pc.lastTry)) {
+		pc.running, pc.tried, pc.lastTry = true, true, now
+		go c.refreshPorts(now)
+	}
+	waitFirst := !pc.haveGood
+	pc.mu.Unlock()
+
+	if waitFirst {
+		t := time.NewTimer(portsFirstWait)
+		select {
+		case <-first:
+		case <-t.C:
+		}
+		t.Stop()
+	}
+
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.haveGood && now.Sub(pc.goodAt) > portsMaxAge {
+		pc.ports, pc.haveGood = nil, false
+	}
+	if !pc.haveGood {
+		return map[int32][]model.Port{}
+	}
+	return pc.ports
+}
+
+func (c *collector) refreshPorts(startedAt time.Time) {
 	run := c.lsof
 	if run == nil {
 		run = runLsof
 	}
-	out, err := run(ctx)
-	if err != nil && len(out) == 0 {
-		// Missing lsof or a failure: cache "no ports" for the TTL so a slow
-		// failure (3 s timeout) is not retried on every poll.
-		c.ports = portCache{at: now, ports: map[int32][]model.Port{}, ok: true}
-		return c.ports.ports
+	out, err := run(context.Background())
+	pc := &c.ports
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if err == nil || len(out) > 0 {
+		pc.ports, pc.goodAt, pc.haveGood = parseLsofPorts(out), startedAt, true
 	}
-	c.ports = portCache{at: now, ports: parseLsofPorts(out), ok: true}
-	return c.ports.ports
+	pc.running = false
+	select {
+	case <-pc.first:
+	default:
+		close(pc.first)
+	}
 }
 
 // parseLsofPorts parses `lsof -F pcnPt` output. Each "p" line starts a

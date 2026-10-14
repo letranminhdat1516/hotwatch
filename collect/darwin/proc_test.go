@@ -4,11 +4,13 @@ package darwin
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -195,5 +197,113 @@ func BenchmarkProcesses(b *testing.B) {
 		if _, err := col.Processes(ctx); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+const fakeLsof = "p42\nf1\ntIPv4\nPTCP\nn*:1234\n"
+
+type fakeRunner struct {
+	mu    sync.Mutex
+	runs  int
+	cur   int
+	maxC  int
+	delay time.Duration
+	fail  bool
+}
+
+func (f *fakeRunner) run(context.Context) ([]byte, error) {
+	f.mu.Lock()
+	f.runs++
+	f.cur++
+	if f.cur > f.maxC {
+		f.maxC = f.cur
+	}
+	delay, fail := f.delay, f.fail
+	f.mu.Unlock()
+	time.Sleep(delay)
+	f.mu.Lock()
+	f.cur--
+	f.mu.Unlock()
+	if fail {
+		return nil, errors.New("lsof failed")
+	}
+	return []byte(fakeLsof), nil
+}
+
+func (f *fakeRunner) set(fn func()) { f.mu.Lock(); fn(); f.mu.Unlock() }
+func (f *fakeRunner) count() int    { f.mu.Lock(); defer f.mu.Unlock(); return f.runs }
+
+var want42 = map[int32][]model.Port{42: {{Number: 1234, Proto: "tcp"}}}
+
+func TestPortsCacheWithinIntervalNoSecondRun(t *testing.T) {
+	f := &fakeRunner{}
+	c := &collector{lsof: f.run}
+	t0 := time.Unix(1000, 0)
+	if got := c.listeningPorts(context.Background(), t0); !reflect.DeepEqual(got, want42) {
+		t.Fatalf("first = %v", got)
+	}
+	c.listeningPorts(context.Background(), t0.Add(2*time.Second))
+	c.listeningPorts(context.Background(), t0.Add(9*time.Second))
+	time.Sleep(50 * time.Millisecond)
+	if n := f.count(); n != 1 {
+		t.Fatalf("runs = %d, want 1", n)
+	}
+}
+
+func TestPortsSlowRefreshDoesNotBlockAndSingleFlight(t *testing.T) {
+	f := &fakeRunner{}
+	c := &collector{lsof: f.run}
+	t0 := time.Unix(1000, 0)
+	c.listeningPorts(context.Background(), t0)
+	f.set(func() { f.delay = 300 * time.Millisecond })
+	start := time.Now()
+	for i := 0; i < 5; i++ {
+		got := c.listeningPorts(context.Background(), t0.Add(11*time.Second+time.Duration(i)*time.Millisecond))
+		if !reflect.DeepEqual(got, want42) {
+			t.Fatalf("stale ports lost: %v", got)
+		}
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Fatalf("calls blocked for %v", d)
+	}
+	time.Sleep(450 * time.Millisecond)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.runs != 2 || f.maxC != 1 {
+		t.Fatalf("runs=%d maxConcurrent=%d, want 2 and 1", f.runs, f.maxC)
+	}
+}
+
+func TestPortsFailureKeepsLastGoodThenExpires(t *testing.T) {
+	f := &fakeRunner{}
+	c := &collector{lsof: f.run}
+	t0 := time.Unix(1000, 0)
+	c.listeningPorts(context.Background(), t0)
+	f.set(func() { f.fail = true })
+	c.listeningPorts(context.Background(), t0.Add(11*time.Second)) // starts failing refresh
+	time.Sleep(50 * time.Millisecond)
+	if got := c.listeningPorts(context.Background(), t0.Add(12*time.Second)); !reflect.DeepEqual(got, want42) {
+		t.Fatalf("good map lost after failure: %v", got)
+	}
+	if n := f.count(); n != 2 {
+		t.Fatalf("runs = %d, want 2 (no retry before interval)", n)
+	}
+	if got := c.listeningPorts(context.Background(), t0.Add(61*time.Second)); len(got) != 0 {
+		t.Fatalf("map older than 60s must be dropped, got %v", got)
+	}
+}
+
+func TestPortsRefreshIgnoresCallerContext(t *testing.T) {
+	f := &fakeRunner{}
+	c := &collector{lsof: func(ctx context.Context) ([]byte, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return f.run(ctx)
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := c.listeningPorts(ctx, time.Unix(1000, 0)); !reflect.DeepEqual(got, want42) {
+		t.Fatalf("cancelled caller ctx blanked ports: %v", got)
 	}
 }

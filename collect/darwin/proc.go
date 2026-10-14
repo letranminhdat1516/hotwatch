@@ -35,6 +35,9 @@ type procPrev struct {
 // processes are unknown: Command "", Name falls back to the executable
 // basename or "?", disk rates are nil. RSS is 0 when unreadable; UI code must
 // not rank such processes in memory top-lists (RSS == 0 means unknown).
+// Callers serialize Sample/Processes; the background lsof refresher is
+// internally synchronized (portCache.mu) and never blocks this call after the
+// first result exists.
 // CPUPct is 0 on first sight of a (pid, start time). Environment is never read.
 func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 	if err := ctx.Err(); err != nil {
