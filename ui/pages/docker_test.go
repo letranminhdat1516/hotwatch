@@ -547,15 +547,23 @@ func TestAppDockerPageCancelsLogsOnPageSwitch(t *testing.T) {
 	if err := tt.Click("Logs"); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2000 && logs.count() < 1; i++ {
+	// Wait for the opener's result to be delivered: the pane leaves
+	// "Connecting…" once the stream is attached.
+	for i := 0; i < 2000; i++ {
+		tt.Frame()
+		if logs.count() == 1 && slices.Contains(tt.Texts(), "Waiting for log lines…") {
+			break
+		}
 		time.Sleep(time.Millisecond)
 	}
-	time.Sleep(20 * time.Millisecond) // the opener's result is delivered
 	if logs.count() != 1 {
 		t.Fatalf("streams %d", logs.count())
 	}
 	if err := tt.Click("Processes"); err != nil {
 		t.Fatal(err)
+	}
+	for i := 0; i < 2000 && logs.cancels(0) < 1; i++ {
+		time.Sleep(time.Millisecond)
 	}
 	if logs.cancels(0) != 1 {
 		t.Fatalf("cancelled %d times on page switch", logs.cancels(0))
@@ -679,5 +687,12 @@ func TestDockerLogsContainerLeavesList(t *testing.T) {
 	}
 	if e.logs.cancels(0) != 1 {
 		t.Fatalf("cancelled %d", e.logs.cancels(0))
+	}
+}
+
+func TestCleanTextMarksDroppedInputEvenWhenResultIsShort(t *testing.T) {
+	got := pages.CleanText(strings.Repeat("\xff", 1<<20)) // one run collapses to one U+FFFD
+	if got != "\uFFFD…" {
+		t.Fatalf("%q", got)
 	}
 }

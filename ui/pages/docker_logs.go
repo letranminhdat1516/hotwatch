@@ -268,8 +268,9 @@ func cleanLine(l model.LogLine) model.LogLine {
 func cleanText(s string) string {
 	// Each bad byte becomes a 3-byte U+FFFD, so bound the input first to
 	// keep the work small, then bound the result.
+	cut := false
 	if len(s) > 2*maxLogText {
-		s = s[:2*maxLogText]
+		s, cut = s[:2*maxLogText], true
 	}
 	s = strings.ToValidUTF8(s, "\uFFFD")
 	s = strings.Map(func(r rune) rune {
@@ -287,7 +288,10 @@ func cleanText(s string) string {
 		for end > 0 && !utf8.RuneStart(s[end]) {
 			end--
 		}
-		s = s[:end] + "…"
+		s, cut = s[:end], true
+	}
+	if cut {
+		s += "…"
 	}
 	return strings.Clone(s)
 }
