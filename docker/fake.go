@@ -92,6 +92,8 @@ type FakeContainer struct {
 	StartedAt   time.Time // reported by /containers/{id}/json State.StartedAt (zero: Docker's "0001-01-01..." value)
 	Health      string    // State.Health.Status; empty means no healthcheck
 	Tty         bool      // Config.Tty; logs are then served unmultiplexed as raw-stream
+	CPUTotal    uint64    // cpu_stats.cpu_usage.total_usage; zero means a default
+	CPUSystem   uint64    // cpu_stats.system_cpu_usage; zero means a default
 	StatsStatus int       // non-zero: /stats answers this HTTP status instead of stats
 }
 
@@ -210,13 +212,14 @@ func (f *FakeState) serve(w http.ResponseWriter, r *http.Request) {
 		f.Mu.Unlock()
 		writeJSON(w, http.StatusOK, body)
 	case r.Method == http.MethodGet && op == "stats":
-		status := c.StatsStatus
+		status, total, system := c.StatsStatus, c.CPUTotal, c.CPUSystem
 		f.Mu.Unlock()
 		if status != 0 {
 			writeJSON(w, status, map[string]string{"message": "stats unavailable"})
 			return
 		}
-		writeJSON(w, http.StatusOK, fakeStats())
+		oneShot := r.URL.Query().Get("one-shot")
+		writeJSON(w, http.StatusOK, fakeStats(total, system, oneShot == "1" || oneShot == "true"))
 	case r.Method == http.MethodGet && op == "logs":
 		frames := append([][]byte(nil), f.LogFrames...)
 		tty := c.Tty
@@ -272,16 +275,19 @@ func (f *FakeState) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func fakeStats() map[string]any {
-	return map[string]any{
+// fakeStats builds a stats document. One-shot responses carry no precpu_stats,
+// like the real daemon's.
+func fakeStats(total, system uint64, oneShot bool) map[string]any {
+	if total == 0 {
+		total = 2_000_000_000
+	}
+	if system == 0 {
+		system = 100_000_000_000
+	}
+	m := map[string]any{
 		"cpu_stats": map[string]any{
-			"cpu_usage":        map[string]any{"total_usage": 2_000_000_000},
-			"system_cpu_usage": 100_000_000_000,
-			"online_cpus":      4,
-		},
-		"precpu_stats": map[string]any{
-			"cpu_usage":        map[string]any{"total_usage": 1_000_000_000},
-			"system_cpu_usage": 90_000_000_000,
+			"cpu_usage":        map[string]any{"total_usage": total},
+			"system_cpu_usage": system,
 			"online_cpus":      4,
 		},
 		"memory_stats": map[string]any{
@@ -289,6 +295,14 @@ func fakeStats() map[string]any {
 			"stats": map[string]any{"inactive_file": 4 << 20},
 		},
 	}
+	if !oneShot {
+		m["precpu_stats"] = map[string]any{
+			"cpu_usage":        map[string]any{"total_usage": 1_000_000_000},
+			"system_cpu_usage": 90_000_000_000,
+			"online_cpus":      4,
+		}
+	}
+	return m
 }
 
 // LogFrame builds one Docker multiplexed log frame: an 8-byte header

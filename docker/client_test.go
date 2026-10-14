@@ -35,7 +35,20 @@ func TestClientListParsesStatsAndInspect(t *testing.T) {
 	f.Containers["exitedid1"] = &FakeContainer{ID: "exitedid1", Name: "old-job", Image: "busybox", State: "exited", Status: "Exited (0) 2 days ago"}
 	f.Mu.Unlock()
 
-	list, err := NewClient(sock).List(context.Background())
+	eng := NewClient(sock)
+	if first, err := eng.List(context.Background()); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, c := range first {
+			if c.CPUPct != nil {
+				t.Fatalf("first List must not report CPU: %+v", c)
+			}
+		}
+	}
+	f.Mu.Lock() // counters advance: Δcpu 1e9 over Δsystem 10e9 on 4 CPUs = 40%
+	f.Containers[id].CPUTotal, f.Containers[id].CPUSystem = 3_000_000_000, 110_000_000_000
+	f.Mu.Unlock()
+	list, err := eng.List(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,5 +326,61 @@ func TestClientLogsUnknownContainer(t *testing.T) {
 	var ae *model.APIError
 	if !errors.As(err, &ae) || ae.Code != "not_found" {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestClientCPUBaselineResetAndPrune(t *testing.T) {
+	sock, f := NewFakeEngine(t)
+	id := seededID(f)
+	e := NewClient(sock)
+	ctx := context.Background()
+	set := func(total, system uint64) {
+		f.Mu.Lock()
+		f.Containers[id].CPUTotal, f.Containers[id].CPUSystem = total, system
+		f.Mu.Unlock()
+	}
+	cpu := func() *float64 {
+		l, err := e.List(ctx)
+		if err != nil || len(l) != 1 {
+			t.Fatalf("list %v %v", l, err)
+		}
+		return l[0].CPUPct
+	}
+	set(1_000_000_000, 10_000_000_000)
+	if cpu() != nil {
+		t.Fatal("first sight should be nil")
+	}
+	set(2_000_000_000, 20_000_000_000)
+	if p := cpu(); p == nil || math.Abs(*p-40) > 1e-9 {
+		t.Fatalf("second sample %v", p)
+	}
+	set(1_500_000_000, 30_000_000_000) // counter decrease (container restarted)
+	if cpu() != nil {
+		t.Fatal("counter decrease should be nil")
+	}
+	set(2_500_000_000, 40_000_000_000)
+	if p := cpu(); p == nil || math.Abs(*p-40) > 1e-9 {
+		t.Fatalf("after reset %v", p)
+	}
+
+	// Removed from the daemon: baseline pruned, so a re-appearing id starts over.
+	f.Mu.Lock()
+	ct := f.Containers[id]
+	delete(f.Containers, id)
+	f.Containers["other"] = &FakeContainer{ID: "other", Name: "o", State: "running"}
+	f.Mu.Unlock()
+	if _, err := e.List(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.(*client).prev); n != 1 {
+		t.Fatalf("baselines kept: %d", n)
+	}
+	f.Mu.Lock()
+	f.Containers[id] = ct
+	delete(f.Containers, "other")
+	f.Mu.Unlock()
+	set(3_000_000_000, 50_000_000_000)
+	if cpu() != nil {
+		t.Fatal("re-appearing id should start over")
 	}
 }
