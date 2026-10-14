@@ -273,3 +273,23 @@ func TestRedirectsNotFollowed(t *testing.T) {
 		t.Fatal("redirect must be an error")
 	}
 }
+
+// CloseIdleConnections drops pooled connections: the next request dials anew.
+func TestCloseIdleConnections(t *testing.T) {
+	e := newEnv(t, false)
+	var dials int
+	c := New(func(ctx context.Context) (net.Conn, error) {
+		dials++
+		return dialTo(e.srv)(ctx)
+	}, tok)
+	if _, err := c.Info(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Info(context.Background()); err != nil || dials != 1 {
+		t.Fatalf("pooled request dialed %d times, err %v", dials, err)
+	}
+	c.CloseIdleConnections()
+	if _, err := c.Info(context.Background()); err != nil || dials != 2 {
+		t.Fatalf("after CloseIdleConnections dials = %d, err %v", dials, err)
+	}
+}

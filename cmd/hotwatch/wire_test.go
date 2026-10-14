@@ -26,6 +26,7 @@ import (
 	"hotwatch/collect"
 	"hotwatch/docker"
 	"hotwatch/hub"
+	"hotwatch/internal/sshtest"
 	"hotwatch/model"
 	"hotwatch/source"
 	"hotwatch/store"
@@ -617,7 +618,7 @@ func TestEffectsTrustHostKey(t *testing.T) {
 
 	bad := *hk
 	bad.Fingerprint = "SHA256:not-it"
-	if err := e.w.effects().TrustHostKey("h1", &bad); err == nil || e.has("replace", "h1") {
+	if err := e.w.effects().TrustHostKey("h1", &bad); err == nil || e.has("retry", "h1") {
 		t.Fatalf("mismatched fingerprint: err %v, calls %v", err, e.hub.got())
 	}
 	if err := e.w.effects().TrustHostKey("h1", hk); err != nil {
@@ -634,8 +635,8 @@ func TestEffectsTrustHostKey(t *testing.T) {
 		t.Fatalf("known_hosts has %d lines: %q", lines, b)
 	}
 	e.w.queue.flush()
-	if !e.has("replace", "h1") {
-		t.Fatalf("host not retried: %v", e.hub.got())
+	if !e.has("retry", "h1") || e.has("replace", "h1") {
+		t.Fatalf("host not retried with its dialer kept: %v", e.hub.got())
 	}
 	if err := e.w.effects().TrustHostKey("nope", hk); err == nil {
 		t.Fatal("unknown host accepted")
@@ -689,7 +690,7 @@ func TestTrustHostKeyRefusedAfterAddressEdit(t *testing.T) {
 				t.Fatal("known_hosts written for an edited address")
 			}
 			e.w.queue.flush()
-			if e.has("replace", "h1") {
+			if e.has("replace", "h1") || e.has("retry", "h1") {
 				t.Fatal("host retried after a refused trust")
 			}
 		})
@@ -953,5 +954,136 @@ func TestSetColumnsAfterShutdownIsIgnored(t *testing.T) {
 	e.w.cfg.Flush()
 	if _, err := os.Stat(e.p.Config); !os.IsNotExist(err) {
 		t.Fatal("columns saved after shutdown")
+	}
+}
+
+// --- the real SSH stack ----------------------------------------------------------
+
+type sshStack struct {
+	l   *loop
+	w   *core
+	app *fakeApp
+	srv *sshtest.Server
+}
+
+// startSSHStack runs the app core against an in-process agent reached through
+// an in-process SSH server whose client key is encrypted with "pw". answer
+// is the user's reply to prompts (nil: never answers).
+func startSSHStack(t *testing.T, answer func(string) (string, bool)) *sshStack {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	col := &collect.Fake{Snap: model.Snapshot{CPU: model.CPU{Total: 7}}}
+	acfg := agent.Config{TokenSHA256: agent.SHA256Hex(testToken)}
+	agentSrv := httptest.NewServer(agent.New(acfg, col, &docker.FakeEngineAPI{}, &agent.FakeSignaller{}, io.Discard))
+	t.Cleanup(agentSrv.Close)
+	srv := sshtest.Start(t, agentSrv.Listener.Addr().String(), "pw")
+	p := testPaths(t)
+	if err := transport.TrustHostKey(p.AppKnownHosts, srv.Host, srv.Port, srv.HostKey, ssh.FingerprintSHA256(srv.HostKey)); err != nil {
+		t.Fatal(err)
+	}
+	c := store.Default()
+	c.Hosts = append(c.Hosts, store.Host{ID: "h1", Name: "box", Kind: "agent", Conn: &store.Conn{Type: "ssh",
+		SSHHost: srv.Host, SSHPort: srv.Port, SSHUser: "tester", KeyPath: srv.KeyPath, AgentPort: 7171}})
+	sec := store.NewMemSecrets()
+	sec.Set(store.TokenKey("h1"), testToken)
+	l := newLoop(t)
+	w := newCore(c, p, sec, localFake, l.post, slog.New(slog.DiscardHandler))
+	app := newFakeApp()
+	app.answer = answer
+	l.do(func() { w.attach(app, "") })
+	l.do(w.startHub)
+	t.Cleanup(w.shutdown)
+	return &sshStack{l: l, w: w, app: app, srv: srv}
+}
+
+// flushWithin fails if the edit queue does not drain in time.
+func flushWithin(t *testing.T, w *core) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { w.queue.flush(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("edit queue blocked")
+	}
+}
+
+func TestPromptWithdrawnWhenHostRemoved(t *testing.T) {
+	st := startSSHStack(t, nil)
+	waitFor(t, st.l, "passphrase prompt", func() bool { return len(st.app.prompts) == 1 })
+	st.l.do(func() {
+		c := st.w.cfg.Config()
+		c.Hosts = c.Hosts[:1]
+		eff := st.w.effects()
+		if err := eff.SaveConfig(c); err != nil {
+			t.Error(err)
+		}
+		eff.HostRemoved("h1")
+	})
+	flushWithin(t, st.w)
+	waitFor(t, st.l, "prompt withdrawn", func() bool {
+		return slices.Equal(st.app.withdrawn, []string{st.srv.KeyPath})
+	})
+}
+
+func TestPromptWithdrawnWhenSourceReplaced(t *testing.T) {
+	st := startSSHStack(t, nil)
+	waitFor(t, st.l, "passphrase prompt", func() bool { return len(st.app.prompts) == 1 })
+	st.l.do(func() {
+		h, _ := st.w.host("h1")
+		st.w.effects().HostChanged(h)
+	})
+	flushWithin(t, st.w)
+	waitFor(t, st.l, "old prompt withdrawn", func() bool { return len(st.app.withdrawn) == 1 })
+	// Only the new dialer's prompt may remain.
+	waitFor(t, st.l, "new dialer prompts", func() bool { return len(st.app.prompts) == 2 })
+	var open int
+	st.l.do(func() { open = len(st.app.prompts) - len(st.app.withdrawn) })
+	if open != 1 {
+		t.Fatalf("%d prompts open", open)
+	}
+}
+
+// Retry on a healthy SSH host keeps its dialer and decrypted key: no prompt.
+func TestRetryHealthySSHHostDoesNotPromptAgain(t *testing.T) {
+	st := startSSHStack(t, func(string) (string, bool) { return "pw", true })
+	var lastOK time.Time
+	waitFor(t, st.l, "h1 online", func() bool {
+		v := st.app.views["h1"]
+		lastOK = v.Conn.LastOK
+		return v.Conn.State == hub.Online
+	})
+	st.l.do(func() { st.app.retry("h1") })
+	flushWithin(t, st.w)
+	waitFor(t, st.l, "h1 online again", func() bool {
+		v := st.app.views["h1"]
+		return v.Conn.State == hub.Online && v.Conn.LastOK.After(lastOK)
+	})
+	var n int
+	st.l.do(func() { n = len(st.app.prompts) })
+	if n != 1 {
+		t.Fatalf("asked for the passphrase %d times", n)
+	}
+}
+
+func TestRetryKeepsHealthySource(t *testing.T) {
+	c := store.Default()
+	c.Hosts = append(c.Hosts, sshHost("h1"))
+	e := newEffEnv(t, c)
+	e.sec.Set(store.TokenKey("h1"), testToken)
+	e.w.buildAgents()
+	e.w.queue.flush()
+	e.app.retry("h1")
+	e.w.queue.flush()
+	replaces := 0
+	for _, c := range e.hub.got() {
+		if c == (hubCall{"replace", "h1"}) {
+			replaces++
+		}
+	}
+	if !e.has("retry", "h1") || replaces != 1 { // the one from buildAgents
+		t.Fatalf("calls %v", e.hub.got())
+	}
+	if len(*e.ds) != 1 || (*e.ds)[0].closed.Load() != 0 {
+		t.Fatalf("dialers %d, first closed %d", len(*e.ds), (*e.ds)[0].closed.Load())
 	}
 }

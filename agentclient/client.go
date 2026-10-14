@@ -55,6 +55,10 @@ func New(dial func(ctx context.Context) (net.Conn, error), token string) *Client
 	return &Client{hc: &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, token: token, timeout: defaultTimeout, actionTimeout: actionTimeout}
 }
 
+// CloseIdleConnections closes pooled connections to the agent; call it when
+// the client is retired.
+func (c *Client) CloseIdleConnections() { c.hc.CloseIdleConnections() }
+
 func (c *Client) newReq(ctx context.Context, method, path string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, nil)
 	if err != nil {

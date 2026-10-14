@@ -64,6 +64,11 @@ func (s *sshSession) close() {
 type sshDialer struct {
 	cfg SSHConfig
 
+	// life is done once Close is called; every connect and passphrase prompt
+	// ends with it, since http.Transport detaches the dial's own ctx.
+	life     context.Context
+	stopLife context.CancelFunc
+
 	keepaliveEvery time.Duration // tests shorten this
 
 	handshakeTimeout time.Duration // tests shorten this
@@ -80,7 +85,8 @@ type sshDialer struct {
 // NewSSH returns a Dialer that tunnels to 127.0.0.1:AgentPort on the host over
 // one reused SSH connection. It opens only direct-tcpip channels.
 func NewSSH(cfg SSHConfig) Dialer {
-	return &sshDialer{cfg: cfg, keepaliveEvery: sshKeepaliveEvery, handshakeTimeout: sshConnectTimeout, closeWait: sshCloseWait, dialSem: make(chan struct{}, 1), prompted: map[string]bool{}}
+	life, stop := context.WithCancel(context.Background())
+	return &sshDialer{cfg: cfg, life: life, stopLife: stop, keepaliveEvery: sshKeepaliveEvery, handshakeTimeout: sshConnectTimeout, closeWait: sshCloseWait, dialSem: make(chan struct{}, 1), prompted: map[string]bool{}}
 }
 
 var errDialerClosed = errors.New("ssh dialer closed")
@@ -109,6 +115,7 @@ func (d *sshDialer) DialAgent(ctx context.Context) (net.Conn, error) {
 }
 
 func (d *sshDialer) Close() error {
+	d.stopLife()
 	d.mu.Lock()
 	s := d.sess
 	d.sess = nil
@@ -159,6 +166,8 @@ func (d *sshDialer) session(ctx context.Context) (*sshSession, error) {
 		defer func() { <-d.dialSem }()
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-d.life.Done():
+		return nil, errDialerClosed
 	}
 	d.mu.Lock()
 	s, closed = d.sess, d.closed
@@ -169,7 +178,12 @@ func (d *sshDialer) session(ctx context.Context) (*sshSession, error) {
 	if s != nil {
 		return s, nil
 	}
-	s, err := d.connect(ctx)
+	cctx, cancel := withLife(ctx, d.life)
+	s, err := d.connect(cctx)
+	cancel()
+	if err != nil && d.life.Err() != nil && ctx.Err() == nil {
+		err = errDialerClosed
+	}
 	d.mu.Lock()
 	if d.closed {
 		d.decrypted, d.prompted = nil, nil // Close could not take the semaphore
@@ -429,4 +443,11 @@ func (d *sshDialer) keepalive(s *sshSession) {
 			return
 		}
 	}
+}
+
+// withLife returns a ctx that ends when ctx or life does.
+func withLife(ctx, life context.Context) (context.Context, context.CancelFunc) {
+	merged, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(life, cancel)
+	return merged, func() { stop(); cancel() }
 }

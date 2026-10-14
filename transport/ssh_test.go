@@ -875,3 +875,37 @@ func TestPassphrasePromptEndsWithDialCtx(t *testing.T) {
 		t.Fatal("cancelled dial succeeded")
 	}
 }
+
+// Close ends a connect that is waiting in a passphrase prompt, even when the
+// dial's own ctx never ends (http.Transport detaches it).
+func TestCloseEndsPassphrasePrompt(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	started := make(chan struct{})
+	ended := make(chan error, 1)
+	cfg.Passphrase = func(ctx context.Context, _ string) (string, error) {
+		close(started)
+		<-ctx.Done()
+		ended <- ctx.Err()
+		return "", ctx.Err()
+	}
+	d := NewSSH(cfg)
+	res := make(chan error, 1)
+	go func() { _, err := d.DialAgent(context.Background()); res <- err }()
+	<-started
+	d.Close()
+	select {
+	case <-ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt outlived Close")
+	}
+	select {
+	case err := <-res:
+		if err == nil {
+			t.Fatal("dial on a closed dialer succeeded")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial blocked past Close")
+	}
+}

@@ -149,8 +149,16 @@ func buildSource(h store.Host, env sourceEnv) (source.Source, io.Closer, error) 
 			KnownHostsFiles: []string{env.Paths.UserKnownHosts, env.Paths.AppKnownHosts},
 			AppKnownHosts:   env.Paths.AppKnownHosts, Passphrase: env.Passphrase})
 	}
-	return remote.New(d.DialAgent, token), d, nil
+	client := remote.New(d.DialAgent, token)
+	return client, closerFunc(func() error {
+		client.CloseIdleConnections()
+		return d.Close()
+	}), nil
 }
+
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
 
 func expandHome(p, home string) string {
 	if rest, ok := strings.CutPrefix(p, "~/"); ok && home != "" {
@@ -268,16 +276,20 @@ func (s *configStore) SetColumns(page string, cols []string) {
 
 // Close writes a pending column change and ignores later ones.
 func (s *configStore) Close() {
-	s.Flush()
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushLocked()
 	s.closed = true
-	s.mu.Unlock()
 }
 
 // Flush writes a pending column change now.
 func (s *configStore) Flush() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.flushLocked()
+}
+
+func (s *configStore) flushLocked() {
 	if s.timer != nil {
 		s.timer.Stop()
 		s.timer = nil
@@ -545,18 +557,20 @@ func (c *core) rebuild(id string) {
 	})
 }
 
-// retry connects to id again. An agent host gets a new source, so a token
-// that could not be read (a locked Keychain) is read again.
+// retry connects to id again. A host whose source could not be built (its
+// token was unreadable, a locked Keychain say) gets a new one; any other keeps
+// its dialer, and with it decrypted keys, so the user is not asked again.
 func (c *core) retry(id string) {
-	h, ok := c.host(id)
-	if !ok {
+	if _, ok := c.host(id); !ok {
 		return
 	}
-	if h.Kind == "local" {
+	src, _ := c.lookup(id)
+	switch src.(type) {
+	case failing, pending:
+		c.rebuild(id)
+	default:
 		c.hub.Retry(id)
-		return
 	}
-	c.rebuild(id)
 }
 
 func (c *core) host(id string) (store.Host, bool) {
