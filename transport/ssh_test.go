@@ -2,6 +2,9 @@ package transport
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
 	"net"
 	"os"
@@ -586,10 +589,12 @@ func TestDeclinedPassphraseIsNotFatalAndNotRepeated(t *testing.T) {
 	d := NewSSH(cfg)
 	defer d.Close()
 	_, err := d.DialAgent(context.Background())
-	if err == nil || strings.Contains(err.Error(), "declined") && !strings.Contains(err.Error(), "authenticate") {
+	if err == nil || !strings.Contains(err.Error(), "authenticate") {
 		t.Fatalf("want auth failure, got %v", err)
 	}
-	d.DialAgent(context.Background())
+	if _, err2 := d.DialAgent(context.Background()); err2 == nil || !strings.Contains(err2.Error(), "authenticate") {
+		t.Fatalf("second dial: want auth failure, got %v", err2)
+	}
 	if calls != 1 {
 		t.Fatalf("prompted %d times, want 1", calls)
 	}
@@ -658,4 +663,128 @@ func TestTrustRefusesSymlinkedParentDir(t *testing.T) {
 	if st, _ := os.Stat(real); st.Mode().Perm() != 0o755 {
 		t.Fatalf("target dir chmodded: %v", st.Mode().Perm())
 	}
+}
+
+// evilDisconnectServer sends an SSH_MSG_DISCONNECT whose text mimics an auth
+// failure, before key exchange completes (so before host key verification).
+func evilDisconnectServer(t *testing.T) (host string, port int, accepts func() int) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	var mu sync.Mutex
+	n := 0
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			n++
+			mu.Unlock()
+			go func() {
+				defer c.Close()
+				c.Write([]byte("SSH-2.0-evil\r\n"))
+				desc := "ssh: unable to authenticate, attempted methods [none publickey]"
+				payload := []byte{1, 0, 0, 0, 2}
+				payload = append(payload, 0, 0, 0, byte(len(desc)))
+				payload = append(payload, desc...)
+				payload = append(payload, 0, 0, 0, 0)
+				pad := 8 - (len(payload)+5)%8
+				if pad < 4 {
+					pad += 8
+				}
+				pkt := []byte{0, 0, 0, byte(1 + len(payload) + pad), byte(pad)}
+				pkt = append(pkt, payload...)
+				pkt = append(pkt, make([]byte, pad)...)
+				c.Write(pkt)
+				time.Sleep(200 * time.Millisecond)
+			}()
+		}
+	}()
+	a := ln.Addr().(*net.TCPAddr)
+	return "127.0.0.1", a.Port, func() int { mu.Lock(); defer mu.Unlock(); return n }
+}
+
+func TestSpoofedDisconnectBeforeHostKeyDoesNotPrompt(t *testing.T) {
+	srv := startTestSSHServer(t)
+	srv.encryptKey("pw")
+	host, port, accepts := evilDisconnectServer(t)
+	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "kh"))
+	cfg.Host, cfg.Port = host, port
+	calls := 0
+	cfg.Passphrase = func(string) (string, error) { calls++; return "pw", nil }
+	d := NewSSH(cfg)
+	defer d.Close()
+	_, err := d.DialAgent(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if calls != 0 {
+		t.Fatalf("prompted %d times for an unverified peer", calls)
+	}
+	if n := accepts(); n != 1 {
+		t.Fatalf("connections to unverified peer = %d, want 1", n)
+	}
+}
+
+func TestRealAuthFailureAfterVerifiedHostKeyPromptsOnce(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	_, foreign, _ := ed25519.GenerateKey(rand.Reader)
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(foreign, "", []byte("pw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.KeyPath = filepath.Join(t.TempDir(), "foreign")
+	os.WriteFile(cfg.KeyPath, pem.EncodeToMemory(block), 0o600)
+	calls := 0
+	cfg.Passphrase = func(string) (string, error) { calls++; return "pw", nil }
+	d := NewSSH(cfg)
+	defer d.Close()
+	if _, err := d.DialAgent(context.Background()); err == nil {
+		t.Fatal("expected auth failure")
+	}
+	if calls != 1 {
+		t.Fatalf("prompted %d times, want 1", calls)
+	}
+}
+
+func TestCloseClearsDecryptedSigners(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	cfg.Passphrase = func(string) (string, error) { return "pw", nil }
+	d := NewSSH(cfg).(*sshDialer)
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if len(d.decrypted) == 0 {
+		t.Fatal("expected cached signer before Close")
+	}
+	d.Close()
+	if len(d.decrypted) != 0 || d.prompted != nil {
+		t.Fatalf("cache not cleared: %d signers, prompted=%v", len(d.decrypted), d.prompted)
+	}
+}
+
+func TestDeclinedPassphraseWithAgentKeyConnects(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	kr := keyringWithClientKey(t, srv)
+	srv.encryptKey("pw")
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, kr))
+	cfg.Passphrase = func(string) (string, error) { return "", errors.New("declined") }
+	d := NewSSH(cfg)
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
 }

@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	closeWait         = 3 * time.Second
 	sshConnectTimeout = 10 * time.Second
 	sshKeepaliveEvery = 15 * time.Second
 	sshKeepaliveMiss  = 2
@@ -113,6 +114,14 @@ func (d *sshDialer) Close() error {
 	if s != nil {
 		s.close()
 	}
+	// Drop cached decrypted keys. If a connect is in flight and holds the
+	// semaphore for too long, it clears the cache itself on the way out.
+	select {
+	case d.dialSem <- struct{}{}:
+		d.decrypted, d.prompted = nil, nil
+		<-d.dialSem
+	case <-time.After(closeWait):
+	}
 	return nil
 }
 
@@ -158,6 +167,11 @@ func (d *sshDialer) session(ctx context.Context) (*sshSession, error) {
 		return s, nil
 	}
 	s, err := d.connect(ctx)
+	d.mu.Lock()
+	if d.closed {
+		d.decrypted, d.prompted = nil, nil // Close could not take the semaphore
+	}
+	d.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -198,9 +212,9 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 	// First attempt: agent keys, cached decrypted keys and key files that
 	// need no passphrase. Passphrases are asked only if that fails.
 	plain, encrypted, keyErr := d.loadFileKeys()
-	s, err := d.handshake(ctx, address, username, checker, append(append([]ssh.Signer(nil), d.decrypted...), plain...))
-	if err == nil || !isAuthFailure(err) || len(encrypted) == 0 || cfg.Passphrase == nil {
-		return s, wrapKeyErr(err, keyErr)
+	s, verified, err := d.handshake(ctx, address, username, checker, append(append([]ssh.Signer(nil), d.decrypted...), plain...))
+	if err == nil || !isAuthFailure(err, verified) || len(encrypted) == 0 || cfg.Passphrase == nil {
+		return s, wrapKeyErr(err, keyErr, verified)
 	}
 	// Prompt outside any handshake deadline, then reconnect once.
 	added := false
@@ -220,26 +234,37 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 		added = true
 	}
 	if !added || ctx.Err() != nil {
-		return nil, wrapKeyErr(err, keyErr)
+		return nil, wrapKeyErr(err, keyErr, verified)
 	}
-	s, err = d.handshake(ctx, address, username, checker, append(append([]ssh.Signer(nil), d.decrypted...), plain...))
-	return s, wrapKeyErr(err, keyErr)
+	s, verified, err = d.handshake(ctx, address, username, checker, append(append([]ssh.Signer(nil), d.decrypted...), plain...))
+	return s, wrapKeyErr(err, keyErr, verified)
 }
 
-func isAuthFailure(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "unable to authenticate")
+// isAuthFailure reports a genuine authentication failure: the host key was
+// verified and accepted on this very attempt, and the error is neither a host
+// key error nor a peer-sent disconnect. A peer can put any text in a
+// disconnect before key exchange completes, so text alone proves nothing.
+func isAuthFailure(err error, hostKeyVerified bool) bool {
+	if err == nil || !hostKeyVerified {
+		return false
+	}
+	var hk *HostKeyError
+	if errors.As(err, &hk) || strings.Contains(err.Error(), "ssh: disconnect, reason") {
+		return false
+	}
+	return strings.Contains(err.Error(), "unable to authenticate")
 }
 
 // wrapKeyErr explains an authentication failure with the key-file problem, if any.
-func wrapKeyErr(err, keyErr error) error {
-	if err != nil && keyErr != nil && isAuthFailure(err) {
+func wrapKeyErr(err, keyErr error, verified bool) error {
+	if keyErr != nil && isAuthFailure(err, verified) {
 		return fmt.Errorf("%w (%v)", err, keyErr)
 	}
 	return err
 }
 
 // handshake dials and authenticates with agent signers followed by extra.
-func (d *sshDialer) handshake(ctx context.Context, address, username string, checker *hostKeyChecker, extra []ssh.Signer) (*sshSession, error) {
+func (d *sshDialer) handshake(ctx context.Context, address, username string, checker *hostKeyChecker, extra []ssh.Signer) (sess *sshSession, hostKeyVerified bool, err error) {
 	agentConn := d.dialAgentSocket()
 	// One "publickey" method: x/crypto tries only the first method of a
 	// given name, so agent keys and file keys share one chain.
@@ -253,9 +278,15 @@ func (d *sshDialer) handshake(ctx context.Context, address, username string, che
 		return append(all, extra...), nil
 	}
 	ccfg := &ssh.ClientConfig{
-		User:              username,
-		Auth:              []ssh.AuthMethod{ssh.PublicKeysCallback(signers)},
-		HostKeyCallback:   checker.callback(),
+		User: username,
+		Auth: []ssh.AuthMethod{ssh.PublicKeysCallback(signers)},
+		HostKeyCallback: func(h string, r net.Addr, k ssh.PublicKey) error {
+			if err := checker.callback()(h, r, k); err != nil {
+				return err
+			}
+			hostKeyVerified = true
+			return nil
+		},
 		HostKeyAlgorithms: checker.algorithms(address),
 		Timeout:           d.handshakeTimeout,
 	}
@@ -266,7 +297,7 @@ func (d *sshDialer) handshake(ctx context.Context, address, username string, che
 		if agentConn != nil {
 			agentConn.Close()
 		}
-		return nil, err
+		return nil, hostKeyVerified, err
 	}
 	// Bound the handshake by the timeout and by ctx.
 	nc.SetDeadline(time.Now().Add(d.handshakeTimeout))
@@ -279,16 +310,16 @@ func (d *sshDialer) handshake(ctx context.Context, address, username string, che
 			agentConn.Close()
 		}
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, hostKeyVerified, ctx.Err()
 		}
-		return nil, err
+		return nil, hostKeyVerified, err
 	}
 	nc.SetDeadline(time.Time{})
 	return &sshSession{
 		client:    ssh.NewClient(sc, chans, reqs),
 		agentConn: agentConn,
 		stop:      make(chan struct{}),
-	}, nil
+	}, true, nil
 }
 
 // dialAgentSocket connects to ssh-agent when SSH_AUTH_SOCK is set and reachable.
