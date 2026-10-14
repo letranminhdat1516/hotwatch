@@ -72,6 +72,7 @@ func Shell(c *ui.Context, a *App, hostPanel func(c *ui.Context), content func())
 	if !slices.Contains(a.tabKeys, a.page) {
 		a.setPage("overview")
 	}
+	a.shortcuts(c, pages)
 	a.tab = slices.Index(a.tabKeys, a.page)
 	title := pages[a.tab].Title
 

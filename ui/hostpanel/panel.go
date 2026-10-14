@@ -151,8 +151,10 @@ func (p *Panel) footer(c *ui.Context, selected string, view func(string) hub.Hos
 	})
 }
 
-// tree builds the groups and hosts under the root.
-func (p *Panel) tree(c *ui.Context, selected string, view func(string) hub.HostView) {
+// walk visits the groups and hosts in the order the tree shows them: in each
+// level the groups, each followed by what it holds, then the hosts. A group
+// holds its children only when expandAll or open.
+func (p *Panel) walk(expandAll bool, group func(g store.Group, depth int), host func(h store.Host, depth int)) {
 	known := map[string]bool{}
 	for _, g := range p.cfg.Groups {
 		known[g.ID] = true
@@ -173,18 +175,33 @@ func (p *Panel) tree(c *ui.Context, selected string, view func(string) hub.HostV
 				continue
 			}
 			seen[g.ID] = true
-			p.groupRow(c, g, depth)
-			if p.isOpen(g.ID) {
+			group(g, depth)
+			if expandAll || p.isOpen(g.ID) {
 				level(g.ID, depth+1)
 			}
 		}
 		for _, h := range p.cfg.Hosts {
 			if parentOf(h.Group) == parent {
-				p.hostRow(c, h, depth, h.ID == selected, view(h.ID))
+				host(h, depth)
 			}
 		}
 	}
 	level("", 0)
+}
+
+// HostOrder is the id of every host in the order the tree lists them, with
+// every group counted as open: keyboard navigation does not skip hosts in
+// collapsed groups.
+func (p *Panel) HostOrder() []string {
+	var ids []string
+	p.walk(true, func(store.Group, int) {}, func(h store.Host, _ int) { ids = append(ids, h.ID) })
+	return ids
+}
+
+// tree builds the groups and hosts under the root.
+func (p *Panel) tree(c *ui.Context, selected string, view func(string) hub.HostView) {
+	p.walk(false, func(g store.Group, depth int) { p.groupRow(c, g, depth) },
+		func(h store.Host, depth int) { p.hostRow(c, h, depth, h.ID == selected, view(h.ID)) })
 }
 
 func indent(depth int) float32 { return float32(depth)*14 + components.Grid }

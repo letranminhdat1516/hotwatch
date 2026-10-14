@@ -86,6 +86,8 @@ type Processes struct {
 	// user hides, shows or moves a column.
 	OnColumns func(cols []string)
 
+	search ui.Handle // the search field
+
 	cols   []string
 	layout ui.TableLayout
 	sort   ui.SortOrder
@@ -341,6 +343,9 @@ func (p *Processes) sync(in ProcessesInput) {
 	}
 }
 
+// FocusSearch gives the search field the keyboard focus.
+func (p *Processes) FocusSearch() { p.search.Focus() }
+
 // Render builds the page.
 func (p *Processes) Render(c *ui.Context, in ProcessesInput) {
 	p.sync(in)
@@ -351,7 +356,7 @@ func (p *Processes) Render(c *ui.Context, in ProcessesInput) {
 			components.Banner(c, components.BannerWarning, "Process list may be stale: "+err.Error())
 		}
 		ui.Row(c).Gap(2 * g()).AlignItems(ui.Center).Children(func() {
-			ui.SearchField(c, &p.query).Label("Search").Grow(1)
+			ui.SearchField(c, &p.query).Label("Search").Bind(&p.search).Grow(1)
 			ui.Checkbox(c, &p.treeMode, "Tree view")
 			p.ensure(in)
 			count := fmt.Sprintf("%d processes", p.cache.shown)
