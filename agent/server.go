@@ -37,7 +37,11 @@ type Signaller interface {
 type Config struct {
 	TokenSHA256 string        // hex SHA-256 of the bearer token; empty rejects every request
 	ReadOnly    bool          // reject every POST with 403 forbidden_read_only
-	Interval    time.Duration // sampling interval (used by the sampler added in a later task)
+	Interval    time.Duration // sampling interval; zero means 2 s
+	// GPU supplies GPUs for each snapshot (nil: none); Clock drives the
+	// sampler (nil: real time).
+	GPU   func(ctx context.Context) ([]model.GPU, error)
+	Clock Clock
 
 	// Info supplies the static host description for /v1/info. The server sets
 	// ProtocolVersion and Caps.ReadOnly itself. Nil yields a minimal HostInfo.
@@ -51,7 +55,7 @@ type Config struct {
 
 type server struct {
 	cfg   Config
-	col   collect.Collector
+	smp   *Sampler
 	eng   docker.Engine
 	sig   Signaller
 	audit *auditor
@@ -71,7 +75,7 @@ func New(cfg Config, col collect.Collector, eng docker.Engine, sig Signaller, au
 	if audit == nil {
 		audit = io.Discard
 	}
-	s := &server{cfg: cfg, col: col, eng: eng, sig: sig, audit: &auditor{w: audit}, lock: newLockout(cfg.Now), mux: http.NewServeMux()}
+	s := &server{cfg: cfg, smp: NewSampler(col, SamplerOptions{Interval: cfg.Interval, Clock: cfg.Clock, GPU: cfg.GPU}), eng: eng, sig: sig, audit: &auditor{w: audit}, lock: newLockout(cfg.Now), mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /v1/info", s.info)
 	s.mux.HandleFunc("GET /v1/snapshot", s.snapshot)
 	s.mux.HandleFunc("GET /v1/processes", s.processes)
@@ -129,7 +133,7 @@ func (s *server) info(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) snapshot(w http.ResponseWriter, r *http.Request) {
-	snap, err := s.col.Sample(r.Context())
+	snap, err := s.smp.Snapshot(r.Context())
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -138,7 +142,7 @@ func (s *server) snapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) processes(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.col.Processes(r.Context())
+	ps, err := s.smp.Processes(r.Context())
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -333,6 +337,7 @@ var statusByCode = map[string]int{
 	"conflict":            http.StatusConflict,
 	codeTooManyRequests:   http.StatusTooManyRequests,
 	"docker_unavailable":  http.StatusBadGateway,
+	"unavailable":         http.StatusServiceUnavailable,
 }
 
 // writeErr sends err as an APIError; non-APIErrors become 500 "internal"
