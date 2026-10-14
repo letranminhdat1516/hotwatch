@@ -2,6 +2,8 @@ package linux
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -108,7 +110,7 @@ type statfsFunc func(mount string) (total, free uint64, err error)
 // sampleDisks fills s.Disks. It returns false when part of the data was
 // unreadable. Rates are nil on the first sample, after a counter reset, and
 // for devices without a /proc/diskstats entry (for example LVM names).
-func (c *collector) sampleDisks(now time.Time, out *[]model.Volume) bool {
+func (c *collector) sampleDisks(ctx context.Context, now time.Time, out *[]model.Volume) bool {
 	mounts, err := readMounts(c.proc("mounts"))
 	if err != nil {
 		return false
@@ -121,7 +123,7 @@ func (c *collector) sampleDisks(now time.Time, out *[]model.Volume) bool {
 	dt := now.Sub(c.prevDiskAt)
 	vols := make([]model.Volume, 0, len(mounts))
 	for _, m := range mounts {
-		total, free, err := c.statfs(m.mount)
+		total, free, err := c.boundedStatfs(ctx, m.mount)
 		if err != nil {
 			ok = false
 			continue
@@ -142,4 +144,54 @@ func (c *collector) sampleDisks(now time.Time, out *[]model.Volume) bool {
 		c.prevDisk, c.prevDiskAt = stats, now
 	}
 	return ok
+}
+
+const defaultStatfsTimeout = 2 * time.Second
+
+var errStatfsBusy = errors.New("statfs still outstanding for mount")
+
+type statfsResult struct {
+	total, free uint64
+	err         error
+}
+
+// boundedStatfs runs statfs in a goroutine so a hung NFS/CIFS/FUSE mount
+// cannot stall sampling. On timeout or ctx cancellation it returns an error;
+// the mount stays marked busy (and is skipped) until the stuck call returns,
+// so goroutines cannot pile up across samples.
+func (c *collector) boundedStatfs(ctx context.Context, mount string) (uint64, uint64, error) {
+	c.statMu.Lock()
+	if c.statBusy[mount] {
+		c.statMu.Unlock()
+		return 0, 0, errStatfsBusy
+	}
+	if c.statBusy == nil {
+		c.statBusy = map[string]bool{}
+	}
+	c.statBusy[mount] = true
+	c.statMu.Unlock()
+
+	fn := c.statfs
+	ch := make(chan statfsResult, 1)
+	go func() {
+		t, f, err := fn(mount)
+		c.statMu.Lock()
+		delete(c.statBusy, mount)
+		c.statMu.Unlock()
+		ch <- statfsResult{t, f, err}
+	}()
+	timeout := c.statfsTimeout
+	if timeout <= 0 {
+		timeout = defaultStatfsTimeout
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case r := <-ch:
+		return r.total, r.free, r.err
+	case <-timer.C:
+		return 0, 0, context.DeadlineExceeded
+	case <-ctx.Done():
+		return 0, 0, ctx.Err()
+	}
 }

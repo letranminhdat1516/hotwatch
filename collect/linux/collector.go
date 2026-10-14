@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"hotwatch/collect"
@@ -24,6 +25,10 @@ type collector struct {
 	statfs   statfsFunc
 	ifaddrs  func(name string) []string // nil: addresses left empty
 	pagesize int
+
+	statfsTimeout time.Duration // 0 = default (2 s)
+	statMu        sync.Mutex
+	statBusy      map[string]bool // mounts with an outstanding statfs
 
 	prevDisk   map[string]diskCounters
 	prevDiskAt time.Time
@@ -73,7 +78,7 @@ func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
 	} else {
 		s.Uptime = up
 	}
-	if !c.sampleDisks(s.Time, &s.Disks) {
+	if !c.sampleDisks(ctx, s.Time, &s.Disks) {
 		add("disks")
 	}
 	if !c.sampleNet(s.Time, &s.Net) {

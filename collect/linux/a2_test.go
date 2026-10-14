@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -271,5 +272,47 @@ func copyTree(t *testing.T, src, dst string) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHungStatfsIsBoundedAndNotRepeated(t *testing.T) {
+	c := newAt("testdata/a0", time.Unix(100, 0))
+	c.statfsTimeout = 50 * time.Millisecond
+	release := make(chan struct{})
+	var calls atomic.Int32
+	good := fixtureStatfs(c)
+	c.statfs = func(m string) (uint64, uint64, error) {
+		if m == "/data" {
+			calls.Add(1)
+			<-release
+		}
+		return good(m)
+	}
+	start := time.Now()
+	s, err := c.Sample(ctx())
+	if err != nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("err=%v took %v", err, time.Since(start))
+	}
+	if !slices.Contains(s.Partial, "disks") || len(s.Disks) != 1 || s.Disks[0].Mount != "/" {
+		t.Fatalf("disks=%+v partial=%v", s.Disks, s.Partial)
+	}
+	s, _ = c.Sample(ctx())
+	if calls.Load() != 1 || !slices.Contains(s.Partial, "disks") {
+		t.Fatalf("calls=%d partial=%v", calls.Load(), s.Partial)
+	}
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		c.statMu.Lock()
+		n := len(c.statBusy)
+		c.statMu.Unlock()
+		if n == 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s, _ = c.Sample(ctx())
+	if slices.Contains(s.Partial, "disks") || len(s.Disks) != 2 {
+		t.Fatalf("recovery: disks=%+v partial=%v", s.Disks, s.Partial)
 	}
 }
