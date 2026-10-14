@@ -29,14 +29,16 @@ const (
 	maxLogLine    = 256 << 10
 
 	defaultTimeout = 3 * time.Second
+	actionTimeout  = 60 * time.Second  // docker stop/restart wait for a 10 s grace period
 	baseURL        = "http://agent/v1" // placeholder host; the dialer decides where it goes
 )
 
 // Client implements source.Source against a remote agent.
 type Client struct {
-	hc      *http.Client
-	token   string
-	timeout time.Duration
+	hc            *http.Client
+	token         string
+	timeout       time.Duration // reads
+	actionTimeout time.Duration // container actions and signals
 }
 
 var _ source.Source = (*Client)(nil)
@@ -45,15 +47,12 @@ var _ source.Source = (*Client)(nil)
 // with token.
 func New(dial func(ctx context.Context) (net.Conn, error), token string) *Client {
 	tr := &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) { return dial(ctx) },
-		// Fail fast if the agent accepts the connection but never answers.
-		// Streams send headers immediately, so this does not affect logs.
-		ResponseHeaderTimeout: defaultTimeout,
-		MaxIdleConnsPerHost:   2,
-		IdleConnTimeout:       60 * time.Second,
-		Proxy:                 nil,
+		DialContext:         func(ctx context.Context, _, _ string) (net.Conn, error) { return dial(ctx) },
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     60 * time.Second,
+		Proxy:               nil,
 	}
-	return &Client{hc: &http.Client{Transport: tr}, token: token, timeout: defaultTimeout}
+	return &Client{hc: &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, token: token, timeout: defaultTimeout, actionTimeout: actionTimeout}
 }
 
 func (c *Client) newReq(ctx context.Context, method, path string) (*http.Request, error) {
@@ -69,7 +68,11 @@ func (c *Client) newReq(ctx context.Context, method, path string) (*http.Request
 // do performs a bounded request and returns the body (at most limit bytes).
 // A non-2xx status becomes *model.APIError.
 func (c *Client) do(ctx context.Context, method, path string, body []byte, limit int64) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	d := c.timeout
+	if method == http.MethodPost {
+		d = c.actionTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 	req, err := c.newReq(ctx, method, path)
 	if err != nil {

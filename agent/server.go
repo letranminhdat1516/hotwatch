@@ -2,6 +2,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -43,6 +44,9 @@ type Config struct {
 	Info func() model.HostInfo
 	// Now is the clock for lockout; nil means time.Now (injectable for tests).
 	Now func() time.Time
+	// ActionTimeout bounds container actions and signals, which are detached
+	// from the client connection; zero means 60 s.
+	ActionTimeout time.Duration
 }
 
 type server struct {
@@ -58,6 +62,9 @@ type server struct {
 // New builds the agent handler. Chain: limitBody, lockout, auth, readOnly,
 // route handler; every POST and every failed auth is audited.
 func New(cfg Config, col collect.Collector, eng docker.Engine, sig Signaller, audit io.Writer) http.Handler {
+	if cfg.ActionTimeout <= 0 {
+		cfg.ActionTimeout = 60 * time.Second
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -87,22 +94,23 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if r.Method == http.MethodPost || authFailed || sw.status == http.StatusTooManyRequests {
 			_, route := s.mux.Handler(r)
-			s.audit.write(auditEntry{Time: s.cfg.Now().UTC(), Remote: ip, Method: clip(r.Method, 16), Route: route, Target: clip(r.URL.Path, 256), Result: sw.status})
+			s.audit.write(auditEntry{Time: s.cfg.Now().UTC(), Remote: ip, Method: clip(r.Method, 16), Route: route, Target: clip(r.URL.Path, 256), Signal: sw.signal, Result: sw.status})
 		}
 	}()
 
-	if s.lock.locked(ip) {
-		w.Header().Set("Retry-After", strconv.Itoa(int(lockoutLength/time.Second)))
-		writeErr(w, &model.APIError{Code: codeTooManyRequests, Message: "too many failed authentications; try again later"})
-		return
-	}
 	if !checkToken(r, s.cfg.TokenSHA256) {
 		authFailed = true
+		// A valid token is never throttled (SSH-tunnel clients all share
+		// 127.0.0.1); only invalid attempts are counted and refused.
+		if s.lock.locked(ip) {
+			w.Header().Set("Retry-After", strconv.Itoa(int(lockoutLength/time.Second)))
+			writeErr(w, &model.APIError{Code: codeTooManyRequests, Message: "too many failed authentications; try again later"})
+			return
+		}
 		s.lock.fail(ip)
 		writeErr(w, &model.APIError{Code: "unauthorized", Message: "missing or invalid token"})
 		return
 	}
-	s.lock.success(ip)
 	if s.cfg.ReadOnly && r.Method == http.MethodPost {
 		writeErr(w, &model.APIError{Code: "forbidden_read_only", Message: "agent is read-only"})
 		return
@@ -151,8 +159,14 @@ func (s *server) signal(w http.ResponseWriter, r *http.Request) {
 		Signal    string `json:"signal"`
 		StartTime string `json:"startTime"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
 		writeErr(w, badRequest("invalid JSON body"))
+		return
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		writeErr(w, badRequest("unexpected data after JSON body"))
 		return
 	}
 	var sig model.Signal
@@ -170,6 +184,10 @@ func (s *server) signal(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest("startTime must be RFC3339Nano"))
 		return
 	}
+	if sw, ok := w.(*statusWriter); ok {
+		sw.signal = string(sig)
+	}
+	s.extendDeadline(w)
 	if err := s.sig.Signal(int32(pid), start, sig); err != nil {
 		writeErr(w, err)
 		return
@@ -225,7 +243,9 @@ func (s *server) containerAction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if err := s.eng.Do(r.Context(), id, act); err != nil {
+	ctx, cancel := s.detached(w, r)
+	defer cancel()
+	if err := s.eng.Do(ctx, id, act); err != nil {
 		writeErr(w, dockerErr(err))
 		return
 	}
@@ -277,6 +297,18 @@ func (s *server) logs(w http.ResponseWriter, r *http.Request) {
 			rc.Flush()
 		}
 	}
+}
+
+// detached returns a context that survives client disconnects (a half-done
+// docker restart is worse than a late answer) but is bounded by ActionTimeout,
+// and extends the write deadline to cover it.
+func (s *server) detached(w http.ResponseWriter, r *http.Request) (context.Context, context.CancelFunc) {
+	s.extendDeadline(w)
+	return context.WithTimeout(context.WithoutCancel(r.Context()), s.cfg.ActionTimeout)
+}
+
+func (s *server) extendDeadline(w http.ResponseWriter) {
+	http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.cfg.ActionTimeout + 5*time.Second))
 }
 
 func badRequest(msg string) *model.APIError {

@@ -32,7 +32,7 @@ func checkToken(r *http.Request, wantHex string) bool {
 		return false
 	}
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok {
+	if !ok || got == "" {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(SHA256Hex(got)), []byte(strings.ToLower(wantHex))) == 1
@@ -115,14 +115,5 @@ func (l *lockout) sweep(now time.Time) {
 		if !now.Before(e.lockedUntil) {
 			delete(l.m, ip)
 		}
-	}
-}
-
-// success clears failure history for ip.
-func (l *lockout) success(ip string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if e := l.m[ip]; e != nil && !l.now().Before(e.lockedUntil) {
-		delete(l.m, ip)
 	}
 }

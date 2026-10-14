@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -106,17 +108,46 @@ func TestLockout(t *testing.T) {
 			t.Fatalf("attempt %d: %d", i, res.StatusCode)
 		}
 	}
-	res := do(t, r.srv, "GET", "/v1/info", tok, "")
+	// invalid attempts are throttled while locked...
+	res := do(t, r.srv, "GET", "/v1/info", "bad", "")
 	if res.StatusCode != 429 || apiCode(t, res) != "too_many_requests" {
-		t.Fatalf("6th with right token: %d", res.StatusCode)
+		t.Fatalf("bad token while locked: %d", res.StatusCode)
+	}
+	if res := do(t, r.srv, "GET", "/v1/info", "", ""); res.StatusCode != 429 {
+		t.Fatalf("no token while locked: %d", res.StatusCode)
+	}
+	// ...but the valid token is never denied (shared 127.0.0.1 over SSH tunnels)
+	if res := do(t, r.srv, "GET", "/v1/info", tok, ""); res.StatusCode != 200 {
+		t.Fatalf("valid token while locked: %d", res.StatusCode)
+	}
+	// a success does not clear the counter
+	if res := do(t, r.srv, "GET", "/v1/info", "bad", ""); res.StatusCode != 429 {
+		t.Fatalf("success cleared lockout: %d", res.StatusCode)
 	}
 	r.advance(59 * time.Second)
-	if res := do(t, r.srv, "GET", "/v1/info", tok, ""); res.StatusCode != 429 {
+	if res := do(t, r.srv, "GET", "/v1/info", "bad", ""); res.StatusCode != 429 {
 		t.Fatalf("still locked: %d", res.StatusCode)
 	}
 	r.advance(2 * time.Second)
-	if res := do(t, r.srv, "GET", "/v1/info", tok, ""); res.StatusCode != 200 {
+	if res := do(t, r.srv, "GET", "/v1/info", "bad", ""); res.StatusCode != 401 {
 		t.Fatalf("after lockout: %d", res.StatusCode)
+	}
+}
+
+func TestEmptyConfigOrTokenRejected(t *testing.T) {
+	for _, digest := range []string{"", SHA256Hex("")} {
+		srv := httptest.NewServer(New(Config{TokenSHA256: digest}, &collect.Fake{}, &docker.FakeEngineAPI{}, &FakeSignaller{}, io.Discard))
+		defer srv.Close()
+		for _, tk := range []string{"", tok} {
+			if res := do(t, srv, "GET", "/v1/info", tk, ""); res.StatusCode != 401 {
+				t.Errorf("digest %q token %q: %d", digest, tk, res.StatusCode)
+			}
+		}
+		req, _ := http.NewRequest("GET", srv.URL+"/v1/info", nil)
+		req.Header.Set("Authorization", "Bearer ")
+		if res, _ := http.DefaultClient.Do(req); res.StatusCode != 401 {
+			t.Errorf("empty bearer with digest %q: %d", digest, res.StatusCode)
+		}
 	}
 }
 
@@ -156,6 +187,8 @@ func TestInputValidation(t *testing.T) {
 		{"POST", "/v1/processes/4242/signal", `{"signal":"TERM","startTime":"yesterday"}`, 400, "bad_request"},
 		{"POST", "/v1/processes/4242/signal", `not json`, 400, "bad_request"},
 		{"POST", "/v1/processes/4242/signal", `{"signal":"TERM","startTime":"2026-01-01T00:00:00Z","pad":"` + strings.Repeat("x", 5000) + `"}`, 400, "bad_request"},
+		{"POST", "/v1/processes/4242/signal", `{"signal":"TERM","startTime":"2026-01-01T00:00:00Z","extra":1}`, 400, "bad_request"},
+		{"POST", "/v1/processes/4242/signal", `{"signal":"TERM","startTime":"2026-01-01T00:00:00Z"} {"signal":"KILL"}`, 400, "bad_request"},
 		{"GET", "/v1/nothing", "", 404, "not_found"},
 	}
 	for _, c := range cases {
@@ -285,6 +318,9 @@ func TestAudit(t *testing.T) {
 	if e["method"] != "POST" || e["result"] != float64(204) || !strings.Contains(e["target"].(string), "jobhunter-bot") || !strings.Contains(e["remote"].(string), "127.0.0.1") {
 		t.Errorf("entry %v", e)
 	}
+	if e["signal"] != nil {
+		t.Errorf("unexpected signal on container action: %v", e)
+	}
 	var f map[string]any
 	json.Unmarshal([]byte(lines[1]), &f)
 	if f["result"] != float64(401) {
@@ -293,5 +329,76 @@ func TestAudit(t *testing.T) {
 	out := r.log.String()
 	if strings.Contains(out, tok) || strings.Contains(out, "leaky-wrong-token") || strings.Contains(strings.ToLower(out), "bearer") || strings.Contains(strings.ToLower(out), "authorization") {
 		t.Fatalf("audit leaks credentials: %s", out)
+	}
+}
+
+func TestAuditRecordsSignal(t *testing.T) {
+	r := newRig(t, false)
+	do(t, r.srv, "POST", "/v1/processes/4242/signal", tok, `{"signal":"KILL","startTime":"2026-01-01T00:00:00Z"}`)
+	if !strings.Contains(r.log.String(), `"signal":"KILL"`) {
+		t.Fatalf("audit: %s", r.log.String())
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, io.ErrShortWrite }
+
+func TestAuditWriteFailureReported(t *testing.T) {
+	var out syncBuf
+	log.SetOutput(&out)
+	defer log.SetOutput(os.Stderr)
+	srv := httptest.NewServer(New(Config{TokenSHA256: SHA256Hex(tok)}, &collect.Fake{}, &docker.FakeEngineAPI{Containers: []model.Container{{ID: "web"}}}, &FakeSignaller{}, failWriter{}))
+	defer srv.Close()
+	if res := do(t, srv, "POST", "/v1/containers/web/start", tok, ""); res.StatusCode != 204 {
+		t.Fatalf("action must still proceed: %d", res.StatusCode)
+	}
+	if !strings.Contains(out.String(), "audit write failed") {
+		t.Fatalf("stderr log: %q", out.String())
+	}
+}
+
+// slowEngine delays Do and records whether its context was cancelled.
+type slowEngine struct {
+	*docker.FakeEngineAPI
+	delay     time.Duration
+	started   chan struct{}
+	ctxErr    chan error
+	deadlined chan bool
+}
+
+func (e *slowEngine) Do(ctx context.Context, id string, act model.ContainerAction) error {
+	_, has := ctx.Deadline()
+	e.deadlined <- has
+	close(e.started)
+	select {
+	case <-time.After(e.delay):
+	case <-ctx.Done():
+	}
+	e.ctxErr <- ctx.Err()
+	return e.FakeEngineAPI.Do(context.Background(), id, act)
+}
+
+func TestActionSurvivesClientDisconnect(t *testing.T) {
+	eng := &slowEngine{FakeEngineAPI: &docker.FakeEngineAPI{Containers: []model.Container{{ID: "web"}}}, delay: 300 * time.Millisecond,
+		started: make(chan struct{}), ctxErr: make(chan error, 1), deadlined: make(chan bool, 1)}
+	srv := httptest.NewServer(New(Config{TokenSHA256: SHA256Hex(tok), ActionTimeout: 5 * time.Second}, &collect.Fake{}, eng, &FakeSignaller{}, io.Discard))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "POST", srv.URL+"/v1/containers/web/restart", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	go http.DefaultClient.Do(req)
+	<-eng.started
+	cancel() // client gives up mid-action
+	if err := <-eng.ctxErr; err != nil {
+		t.Fatalf("action context cancelled by client disconnect: %v", err)
+	}
+	if !<-eng.deadlined {
+		t.Fatal("action context has no timeout")
+	}
+	eng.FakeEngineAPI.Mu.Lock()
+	defer eng.FakeEngineAPI.Mu.Unlock()
+	if len(eng.FakeEngineAPI.Done) != 1 {
+		t.Fatalf("done %v", eng.FakeEngineAPI.Done)
 	}
 }

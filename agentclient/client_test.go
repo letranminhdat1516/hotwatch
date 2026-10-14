@@ -228,3 +228,48 @@ func TestLogsErrorBeforeStream(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+type slowEngine struct {
+	*docker.FakeEngineAPI
+	delay time.Duration
+}
+
+func (e *slowEngine) Do(ctx context.Context, id string, act model.ContainerAction) error {
+	time.Sleep(e.delay)
+	return e.FakeEngineAPI.Do(ctx, id, act)
+}
+
+func TestActionOutlastsReadTimeout(t *testing.T) {
+	eng := &slowEngine{FakeEngineAPI: &docker.FakeEngineAPI{Containers: []model.Container{{ID: "web"}}}, delay: 400 * time.Millisecond}
+	srv := httptest.NewServer(agent.New(agent.Config{TokenSHA256: agent.SHA256Hex(tok)}, &collect.Fake{}, eng, &agent.FakeSignaller{}, io.Discard))
+	defer srv.Close()
+	c := New(dialTo(srv), tok)
+	c.timeout = 100 * time.Millisecond
+	if err := c.ContainerAction(context.Background(), "web", model.ActionRestart); err != nil {
+		t.Fatalf("action must use the longer timeout: %v", err)
+	}
+	if len(eng.Done) != 1 {
+		t.Fatalf("done %v", eng.Done)
+	}
+	// reads keep the short timeout
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { time.Sleep(400 * time.Millisecond) }))
+	defer slow.Close()
+	c2 := New(dialTo(slow), tok)
+	c2.timeout = 100 * time.Millisecond
+	if _, err := c2.Info(context.Background()); err == nil {
+		t.Fatal("read should time out")
+	}
+}
+
+func TestRedirectsNotFollowed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/info" {
+			t.Errorf("followed redirect to %s (credentials would be forwarded)", r.URL.Path)
+		}
+		http.Redirect(w, r, "/elsewhere", 302)
+	}))
+	defer srv.Close()
+	if _, err := New(dialTo(srv), tok).Info(context.Background()); err == nil {
+		t.Fatal("redirect must be an error")
+	}
+}

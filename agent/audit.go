@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ type auditEntry struct {
 	Method string    `json:"method"`
 	Route  string    `json:"route"`
 	Target string    `json:"target"`
+	Signal string    `json:"signal,omitempty"`
 	Result int       `json:"result"`
 }
 
@@ -30,7 +32,9 @@ func (a *auditor) write(e auditEntry) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.w.Write(append(b, '\n')) // best effort: audit I/O failure must not block the action
+	if _, err := a.w.Write(append(b, '\n')); err != nil {
+		log.Printf("hotwatch-agent: audit write failed: %v", err) // never drop silently; do not block the action
+	}
 }
 
 // statusWriter records the response status for the audit line and passes
@@ -38,6 +42,7 @@ func (a *auditor) write(e auditEntry) {
 type statusWriter struct {
 	http.ResponseWriter
 	status int
+	signal string // set by the signal handler for the audit line
 }
 
 func (s *statusWriter) WriteHeader(code int) {
