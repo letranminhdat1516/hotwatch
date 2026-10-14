@@ -25,6 +25,7 @@ type App struct {
 
 	selected string
 	page     string
+	nextHost string // host a shortcut chose, selected at the start of the next frame
 	views    map[string]hub.HostView
 	gen      uint64 // bumped by Apply: pages recompute only when it changes
 	now      func() time.Time
@@ -143,13 +144,18 @@ func (a *App) setPage(page string) {
 	a.onSelect(a.selected, page)
 }
 
-// selectHost switches every page to host id.
+// selectHost switches every page to host id. A page the host cannot show
+// becomes Overview, so onSelect never sees an invalid page.
 func (a *App) selectHost(id string) {
 	if id == a.selected {
 		return
 	}
 	a.docker.CloseLogs()
 	a.selected = id
+	if !slices.ContainsFunc(visiblePages(a.views[id].Info.Caps), func(p Page) bool { return p.Key == a.page }) {
+		a.page = "overview"
+	}
+	a.tab = -1 // the top bar's index belongs to the previous host's pages
 	a.onSelect(id, a.page)
 }
 

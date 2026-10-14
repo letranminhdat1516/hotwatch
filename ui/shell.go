@@ -57,6 +57,11 @@ const DefaultPanelWidth = 260
 func Shell(c *ui.Context, a *App, hostPanel func(c *ui.Context), content func()) {
 	c.SetTheme(themeFor(c.Theme().Dark))
 	t := c.Theme()
+	// A host chosen by a shortcut last frame is selected before any view is read.
+	if id := a.nextHost; id != "" {
+		a.nextHost = ""
+		a.selectHost(id)
+	}
 	v := a.views[a.selected]
 	now := a.now()
 

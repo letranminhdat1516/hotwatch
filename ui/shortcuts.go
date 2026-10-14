@@ -25,10 +25,10 @@ func (a *App) shortcuts(c *ui.Context, pages []Page) {
 		a.setPage("settings")
 	}
 	if c.Shortcut(ui.Cmd|ui.Alt, ui.KeyDown) {
-		a.stepHost(1)
+		a.stepHost(c, 1)
 	}
 	if c.Shortcut(ui.Cmd|ui.Alt, ui.KeyUp) {
-		a.stepHost(-1)
+		a.stepHost(c, -1)
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyF) && a.page == "processes" {
 		a.procs.FocusSearch()
@@ -47,17 +47,25 @@ func (a *App) hostOrder() []string {
 	return ids
 }
 
-// stepHost selects the host delta places after the selected one, wrapping.
-func (a *App) stepHost(delta int) {
+// stepHost chooses the host delta places after the selected one (or after
+// the one already chosen this frame), wrapping. A selected host missing from
+// the order counts as index 0. The switch happens at the start of the next
+// frame so no frame pairs one host's id with another's data.
+func (a *App) stepHost(c *ui.Context, delta int) {
 	order := a.hostOrder()
 	if len(order) == 0 {
 		return
 	}
+	from := a.selected
+	if a.nextHost != "" {
+		from = a.nextHost
+	}
 	i := 0
 	for j, id := range order {
-		if id == a.selected {
+		if id == from {
 			i = j
 		}
 	}
-	a.selectHost(order[((i+delta)%len(order)+len(order))%len(order)])
+	a.nextHost = order[((i+delta)%len(order)+len(order))%len(order)]
+	c.Invalidate()
 }
