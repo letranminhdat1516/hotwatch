@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -19,7 +20,7 @@ import (
 )
 
 const (
-	closeWait         = 3 * time.Second
+	sshCloseWait      = 3 * time.Second
 	sshConnectTimeout = 10 * time.Second
 	sshKeepaliveEvery = 15 * time.Second
 	sshKeepaliveMiss  = 2
@@ -65,6 +66,7 @@ type sshDialer struct {
 	keepaliveEvery time.Duration // tests shorten this
 
 	handshakeTimeout time.Duration // tests shorten this
+	closeWait        time.Duration // how long Close waits for an in-flight connect; tests shorten this
 	dialSem          chan struct{} // serialises connects; waiters honour ctx
 	// decrypted and prompted are guarded by dialSem and live in memory only.
 	decrypted []ssh.Signer
@@ -77,7 +79,7 @@ type sshDialer struct {
 // NewSSH returns a Dialer that tunnels to 127.0.0.1:AgentPort on the host over
 // one reused SSH connection. It opens only direct-tcpip channels.
 func NewSSH(cfg SSHConfig) Dialer {
-	return &sshDialer{cfg: cfg, keepaliveEvery: sshKeepaliveEvery, handshakeTimeout: sshConnectTimeout, dialSem: make(chan struct{}, 1), prompted: map[string]bool{}}
+	return &sshDialer{cfg: cfg, keepaliveEvery: sshKeepaliveEvery, handshakeTimeout: sshConnectTimeout, closeWait: sshCloseWait, dialSem: make(chan struct{}, 1), prompted: map[string]bool{}}
 }
 
 var errDialerClosed = errors.New("ssh dialer closed")
@@ -120,7 +122,7 @@ func (d *sshDialer) Close() error {
 	case d.dialSem <- struct{}{}:
 		d.decrypted, d.prompted = nil, nil
 		<-d.dialSem
-	case <-time.After(closeWait):
+	case <-time.After(d.closeWait):
 	}
 	return nil
 }
@@ -264,7 +266,7 @@ func wrapKeyErr(err, keyErr error, verified bool) error {
 }
 
 // handshake dials and authenticates with agent signers followed by extra.
-func (d *sshDialer) handshake(ctx context.Context, address, username string, checker *hostKeyChecker, extra []ssh.Signer) (sess *sshSession, hostKeyVerified bool, err error) {
+func (d *sshDialer) handshake(ctx context.Context, address, username string, checker *hostKeyChecker, extra []ssh.Signer) (*sshSession, bool, error) {
 	agentConn := d.dialAgentSocket()
 	// One "publickey" method: x/crypto tries only the first method of a
 	// given name, so agent keys and file keys share one chain.
@@ -277,14 +279,17 @@ func (d *sshDialer) handshake(ctx context.Context, address, username string, che
 		}
 		return append(all, extra...), nil
 	}
+	var verified atomic.Bool // this attempt's host key was accepted
 	ccfg := &ssh.ClientConfig{
 		User: username,
 		Auth: []ssh.AuthMethod{ssh.PublicKeysCallback(signers)},
+		// The callback stays attached to the live client and may run again
+		// on rekey from the key-exchange goroutine, hence the atomic.
 		HostKeyCallback: func(h string, r net.Addr, k ssh.PublicKey) error {
 			if err := checker.callback()(h, r, k); err != nil {
 				return err
 			}
-			hostKeyVerified = true
+			verified.Store(true)
 			return nil
 		},
 		HostKeyAlgorithms: checker.algorithms(address),
@@ -297,13 +302,14 @@ func (d *sshDialer) handshake(ctx context.Context, address, username string, che
 		if agentConn != nil {
 			agentConn.Close()
 		}
-		return nil, hostKeyVerified, err
+		return nil, false, err
 	}
 	// Bound the handshake by the timeout and by ctx.
 	nc.SetDeadline(time.Now().Add(d.handshakeTimeout))
 	stopWatch := context.AfterFunc(ctx, func() { nc.Close() })
 	sc, chans, reqs, err := ssh.NewClientConn(nc, address, ccfg)
 	stopWatch()
+	hostKeyVerified := verified.Load()
 	if err != nil {
 		nc.Close()
 		if agentConn != nil {

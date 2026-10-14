@@ -773,18 +773,68 @@ func TestCloseClearsDecryptedSigners(t *testing.T) {
 	}
 }
 
-func TestDeclinedPassphraseWithAgentKeyConnects(t *testing.T) {
+func TestDeclinedPassphraseThenAgentKeyConnectsWithoutPrompt(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := trustedConfig(t, srv)
-	kr := keyringWithClientKey(t, srv)
-	srv.encryptKey("pw")
-	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, kr))
-	cfg.Passphrase = func(string) (string, error) { return "", errors.New("declined") }
-	d := NewSSH(cfg)
-	defer d.Close()
-	c, err := d.DialAgent(context.Background())
+	raw, _ := os.ReadFile(srv.keyPath)
+	priv, err := ssh.ParseRawPrivateKey(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	srv.encryptKey("pw") // the only usable key is now an encrypted file
+	kr := agent.NewKeyring()
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, kr))
+	calls := 0
+	cfg.Passphrase = func(string) (string, error) { calls++; return "", errors.New("declined") }
+	d := NewSSH(cfg)
+	defer d.Close()
+	if _, err := d.DialAgent(context.Background()); err == nil || !strings.Contains(err.Error(), "authenticate") {
+		t.Fatalf("first dial: want auth failure, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("first dial prompted %d times, want 1", calls)
+	}
+	if err := kr.Add(agent.AddedKey{PrivateKey: priv}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatalf("second dial with agent key: %v", err)
+	}
 	c.Close()
+	if calls != 1 {
+		t.Fatalf("prompted %d times in total, want 1", calls)
+	}
+}
+
+func TestCloseDuringInFlightDialClearsSigners(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cfg.Passphrase = func(string) (string, error) { close(started); <-release; return "pw", nil }
+	d := NewSSH(cfg).(*sshDialer)
+	d.closeWait = 50 * time.Millisecond
+	done := make(chan error, 1)
+	go func() {
+		c, err := d.DialAgent(context.Background())
+		if c != nil {
+			c.Close()
+		}
+		done <- err
+	}()
+	<-started
+	t0 := time.Now()
+	d.Close()
+	if el := time.Since(t0); el > time.Second {
+		t.Fatalf("Close took %v with closeWait 50ms", el)
+	}
+	close(release)
+	if err := <-done; !errors.Is(err, errDialerClosed) {
+		t.Fatalf("in-flight dial: got %v, want errDialerClosed", err)
+	}
+	if len(d.decrypted) != 0 || d.prompted != nil {
+		t.Fatalf("cache not cleared: %d signers, prompted=%v", len(d.decrypted), d.prompted)
+	}
 }
