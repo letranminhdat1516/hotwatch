@@ -92,6 +92,11 @@ func TestBadgeStateColours(t *testing.T) {
 		{"paused", "Paused", func(t *ui.Theme) ui.Color { return t.TextMuted }},
 		{"read-only", "Read-only", func(t *ui.Theme) ui.Color { return t.TextMuted }},
 		{"Connecting", "Connecting", func(t *ui.Theme) ui.Color { return t.TextMuted }},
+		{"normal", "Normal", func(t *ui.Theme) ui.Color { return t.Success }},
+		{"warn", "Warning", func(t *ui.Theme) ui.Color { return t.Warning }},
+		{"critical", "Critical", func(t *ui.Theme) ui.Color { return t.Danger }},
+		{"up", "Up", func(t *ui.Theme) ui.Color { return t.Success }},
+		{"down", "Down", func(t *ui.Theme) ui.Color { return t.TextMuted }},
 	}
 	for _, dark := range []bool{false, true} {
 		th := ui.LightTheme()
@@ -136,5 +141,31 @@ func TestCardValueWithUnitAndUnknown(t *testing.T) {
 	}
 	if slices.Contains(tt.Texts(), "— %") {
 		t.Errorf("unit printed after an unknown value: %q", tt.Texts())
+	}
+}
+
+func TestBarRowShowsLabelAndValue(t *testing.T) {
+	v := 42.5
+	tt := ui.NewTester(func(c *ui.Context) {
+		components.BarRow(c, "Core 1", &v, "42.5 %")
+		components.BarRow(c, "Core 2", nil, "—")
+	}, 400, 100)
+	for _, want := range []string{"Core 1", "42.5 %", "Core 2", "—"} {
+		if !slices.Contains(tt.Texts(), want) {
+			t.Errorf("missing %q in %q", want, tt.Texts())
+		}
+	}
+}
+
+func TestStackedBarLegend(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		components.StackedBar(c, []components.Segment{
+			{Label: "App", Value: 8 << 30}, {Label: "Free", Value: 4 << 30},
+		})
+	}, 500, 100)
+	for _, want := range []string{"App", "8.0 GB", "Free", "4.0 GB"} {
+		if !slices.Contains(tt.Texts(), want) {
+			t.Errorf("missing %q in %q", want, tt.Texts())
+		}
 	}
 }

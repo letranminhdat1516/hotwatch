@@ -21,7 +21,8 @@ type stateLook struct {
 	label string
 }
 
-// states maps lower-cased connection, container and action states to their
+// states maps lower-cased connection, container, action, memory pressure
+// and interface states to their
 // tone and plain label.
 var states = map[string]stateLook{
 	"online":          {Good, "Online"},
@@ -41,6 +42,11 @@ var states = map[string]stateLook{
 	"read-only":       {Neutral, "Read-only"},
 	"connecting":      {Neutral, "Connecting"},
 	"created":         {Neutral, "Created"},
+	"normal":          {Good, "Normal"},
+	"warn":            {Attention, "Warning"},
+	"critical":        {Bad, "Critical"},
+	"up":              {Good, "Up"},
+	"down":            {Neutral, "Down"},
 }
 
 func look(state string) stateLook {

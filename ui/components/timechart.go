@@ -16,9 +16,9 @@ import (
 // ChartWindow is how far back a TimeChart looks.
 const ChartWindow = 5 * time.Minute
 
-// seriesColors are the line colours after the accent, for the second and
-// later series.
-func seriesColors(t *ui.Theme) []ui.Color {
+// SeriesColors are the line colours: the accent, then the colours of the
+// second and later series.
+func SeriesColors(t *ui.Theme) []ui.Color {
 	if t.Dark {
 		return []ui.Color{t.Accent, ui.Hex("#8f9cf5"), ui.Hex("#f0b35a"), ui.Hex("#e486bd")}
 	}
@@ -79,7 +79,7 @@ func TimeChart(c *ui.Context, title, unit string, series map[string][]hub.Point,
 		names = append(names, n)
 	}
 	slices.Sort(names)
-	colors := seriesColors(t)
+	colors := SeriesColors(t)
 	color := func(i int) ui.Color { return colors[i%len(colors)] }
 
 	hi := 100.0
