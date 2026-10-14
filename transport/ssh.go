@@ -135,6 +135,22 @@ func (d *sshDialer) Close() error {
 	return nil
 }
 
+var _ PromptResetter = (*sshDialer)(nil)
+
+// ResetPrompts forgets which key files were already prompted for, under the
+// dial semaphore so it never races a connect; it waits for one in flight and
+// returns at once on a closed dialer.
+func (d *sshDialer) ResetPrompts() {
+	select {
+	case d.dialSem <- struct{}{}:
+		if d.prompted != nil {
+			d.prompted = map[string]bool{}
+		}
+		<-d.dialSem
+	case <-d.life.Done():
+	}
+}
+
 func (d *sshDialer) current() *sshSession {
 	d.mu.Lock()
 	defer d.mu.Unlock()

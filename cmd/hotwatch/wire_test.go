@@ -1087,3 +1087,36 @@ func TestRetryKeepsHealthySource(t *testing.T) {
 		t.Fatalf("dialers %d, first closed %d", len(*e.ds), (*e.ds)[0].closed.Load())
 	}
 }
+
+// A declined passphrase is not asked again on automatic reconnects, but an
+// explicit Retry asks exactly once more; the right answer brings the host
+// Online.
+func TestRetryReasksDeclinedPassphrase(t *testing.T) {
+	var mu sync.Mutex
+	reply := func(string) (string, bool) { return "", false }
+	st := startSSHStack(t, func(k string) (string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		return reply(k)
+	})
+	// The decline fails the connect; wait for a later automatic attempt too.
+	waitFor(t, st.l, "a reconnect after the decline", func() bool {
+		v := st.app.views["h1"]
+		return v.Conn.State != hub.Online && v.Conn.State != hub.Connecting && v.Conn.Failures >= 2
+	})
+	var n int
+	st.l.do(func() { n = len(st.app.prompts) })
+	if n != 1 {
+		t.Fatalf("automatic reconnects prompted: %d prompts", n)
+	}
+	mu.Lock()
+	reply = func(string) (string, bool) { return "pw", true }
+	mu.Unlock()
+	st.l.do(func() { st.app.retry("h1") })
+	flushWithin(t, st.w)
+	waitFor(t, st.l, "h1 online after retry", func() bool { return st.app.views["h1"].Conn.State == hub.Online })
+	st.l.do(func() { n = len(st.app.prompts) })
+	if n != 2 {
+		t.Fatalf("prompts after retry %d, want 2", n)
+	}
+}

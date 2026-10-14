@@ -909,3 +909,60 @@ func TestCloseEndsPassphrasePrompt(t *testing.T) {
 		t.Fatal("dial blocked past Close")
 	}
 }
+
+// ResetPrompts lets the next connect ask again for a key whose prompt was
+// declined; without it a declined key is never asked for again.
+func TestResetPromptsAsksAgainOnce(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	calls := 0
+	cfg.Passphrase = func(context.Context, string) (string, error) {
+		calls++
+		if calls == 1 {
+			return "", errors.New("declined")
+		}
+		return "pw", nil
+	}
+	d := NewSSH(cfg)
+	defer d.Close()
+	if _, err := d.DialAgent(context.Background()); err == nil {
+		t.Fatal("declined key authenticated")
+	}
+	if _, err := d.DialAgent(context.Background()); err == nil || calls != 1 {
+		t.Fatalf("automatic redial: err %v, prompts %d", err, calls)
+	}
+	r, ok := d.(PromptResetter)
+	if !ok {
+		t.Fatal("ssh dialer has no ResetPrompts")
+	}
+	r.ResetPrompts()
+	c, err := d.DialAgent(context.Background())
+	if err != nil || calls != 2 {
+		t.Fatalf("after reset: err %v, prompts %d", err, calls)
+	}
+	c.Close()
+}
+
+// ResetPrompts keeps keys already decrypted: a later connect needs no prompt.
+func TestResetPromptsKeepsDecryptedKeys(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	calls := 0
+	cfg.Passphrase = func(context.Context, string) (string, error) { calls++; return "pw", nil }
+	d := NewSSH(cfg)
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	d.(PromptResetter).ResetPrompts()
+	srv.restart() // drop the session: the next dial reconnects
+	c, err = d.DialAgent(context.Background())
+	if err != nil || calls != 1 {
+		t.Fatalf("reconnect after reset: err %v, prompts %d", err, calls)
+	}
+	c.Close()
+}

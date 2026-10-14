@@ -150,15 +150,26 @@ func buildSource(h store.Host, env sourceEnv) (source.Source, io.Closer, error) 
 			AppKnownHosts:   env.Paths.AppKnownHosts, Passphrase: env.Passphrase})
 	}
 	client := remote.New(d.DialAgent, token)
-	return client, closerFunc(func() error {
-		client.CloseIdleConnections()
-		return d.Close()
-	}), nil
+	return client, &agentCloser{client: client, dialer: d}, nil
 }
 
-type closerFunc func() error
+// agentCloser retires an agent source: idle HTTP connections, then the
+// dialer. It passes ResetPrompts through to a dialer that has it.
+type agentCloser struct {
+	client interface{ CloseIdleConnections() }
+	dialer transport.Dialer
+}
 
-func (f closerFunc) Close() error { return f() }
+func (a *agentCloser) Close() error {
+	a.client.CloseIdleConnections()
+	return a.dialer.Close()
+}
+
+func (a *agentCloser) ResetPrompts() {
+	if r, ok := a.dialer.(transport.PromptResetter); ok {
+		r.ResetPrompts()
+	}
+}
 
 func expandHome(p, home string) string {
 	if rest, ok := strings.CutPrefix(p, "~/"); ok && home != "" {
@@ -194,6 +205,12 @@ func (r *registry) remove(id string) io.Closer {
 	delete(r.srcs, id)
 	delete(r.closers, id)
 	return c
+}
+
+func (r *registry) closer(id string) io.Closer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closers[id]
 }
 
 func (r *registry) lookup(id string) (source.Source, bool) {
@@ -557,9 +574,12 @@ func (c *core) rebuild(id string) {
 	})
 }
 
-// retry connects to id again. A host whose source could not be built (its
-// token was unreadable, a locked Keychain say) gets a new one; any other keeps
-// its dialer, and with it decrypted keys, so the user is not asked again.
+// retry connects to id again, as the user asked. A host whose source could
+// not be built (its token was unreadable, a locked Keychain say) gets a new
+// one. Any other keeps its dialer, and with it decrypted keys, so a key that
+// worked is not asked for again; a passphrase prompt the user declined may be
+// asked once more. The reset waits for a connect in flight, so it runs on the
+// edit queue.
 func (c *core) retry(id string) {
 	if _, ok := c.host(id); !ok {
 		return
@@ -568,9 +588,17 @@ func (c *core) retry(id string) {
 	switch src.(type) {
 	case failing, pending:
 		c.rebuild(id)
-	default:
-		c.hub.Retry(id)
+		return
 	}
+	r, ok := c.reg.closer(id).(transport.PromptResetter)
+	if !ok {
+		c.hub.Retry(id)
+		return
+	}
+	c.queue.do(func() {
+		r.ResetPrompts()
+		c.hub.Retry(id)
+	})
 }
 
 func (c *core) host(id string) (store.Host, bool) {
