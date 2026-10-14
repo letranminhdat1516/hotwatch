@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hotwatch/agent"
 )
@@ -163,5 +164,57 @@ func TestInitRefusesExistingConfigUnlessRotate(t *testing.T) {
 	after, _ := agent.LoadConfig(p)
 	if out1 == out2 || after.TokenSHA256 == before.TokenSHA256 || agent.SHA256Hex(strings.TrimSpace(out2)) != after.TokenSHA256 {
 		t.Fatal("rotate must install a new token")
+	}
+}
+
+type stepClock struct{ now time.Time }
+
+func (c *stepClock) Now() time.Time { return c.now }
+func (c *stepClock) After(d time.Duration) <-chan time.Time {
+	c.now = c.now.Add(d)
+	ch := make(chan time.Time, 1)
+	ch <- c.now
+	return ch
+}
+
+func TestWaitAssignedRetriesUntilAddressAppears(t *testing.T) {
+	calls := 0
+	lister := func() ([]net.IP, error) {
+		calls++
+		if calls < 4 {
+			return nil, nil
+		}
+		return []net.IP{net.ParseIP("100.100.1.1")}, nil
+	}
+	clk := &stepClock{now: time.Unix(0, 0)}
+	if err := waitAssigned("100.100.1.1:7171", lister, clk, func(string, ...any) {}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 4 || clk.now.Sub(time.Unix(0, 0)) != 6*time.Second {
+		t.Fatalf("calls=%d waited=%v", calls, clk.now.Sub(time.Unix(0, 0)))
+	}
+}
+
+func TestWaitAssignedGivesUpAfter60s(t *testing.T) {
+	clk := &stepClock{now: time.Unix(0, 0)}
+	err := waitAssigned("100.100.1.1:7171", func() ([]net.IP, error) { return nil, nil }, clk, func(string, ...any) {})
+	if err == nil || clk.now.Sub(time.Unix(0, 0)) < 60*time.Second || clk.now.Sub(time.Unix(0, 0)) > 62*time.Second {
+		t.Fatalf("err=%v waited=%v", err, clk.now.Sub(time.Unix(0, 0)))
+	}
+}
+
+func TestWaitAssignedDoesNotRetryInvalidAddress(t *testing.T) {
+	clk := &stepClock{now: time.Unix(0, 0)}
+	if err := waitAssigned("0.0.0.0:7171", func() ([]net.IP, error) { return nil, nil }, clk, func(string, ...any) {}); err == nil || !clk.now.Equal(time.Unix(0, 0)) {
+		t.Fatalf("invalid address must fail immediately (err=%v)", err)
+	}
+}
+
+func TestRotateWarnsOldTokenStops(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "agent.json")
+	runInit(t, noTailscale, "--mode", "ssh", "--config", p)
+	_, errOut, err := runInit(t, noTailscale, "--mode", "ssh", "--rotate", "--config", p)
+	if err != nil || !strings.Contains(errOut, "old token stops working within 5 seconds") {
+		t.Fatalf("stderr = %q, err=%v", errOut, err)
 	}
 }

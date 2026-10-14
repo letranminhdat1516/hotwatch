@@ -255,7 +255,41 @@ func TestSamplerFirstSnapshotWaitIsBounded(t *testing.T) {
 		t.Fatal("Snapshot did not return")
 	}
 	var ae *model.APIError
-	if err != nil && !errors.As(err, &ae) {
-		t.Fatalf("err = %v, want APIError or success", err)
+	if !errors.As(err, &ae) || ae.Code != "unavailable" {
+		t.Fatalf("err = %v, want APIError unavailable", err)
+	}
+}
+
+type hangingProcs struct{ countingCollector }
+
+func (h *hangingProcs) Processes(ctx context.Context) ([]model.Process, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestSamplerProcessesTimeout(t *testing.T) {
+	col, clk := &hangingProcs{}, newFakeClock()
+	s := NewSampler(col, SamplerOptions{Interval: 2 * time.Second, Clock: clk, ProcessesTimeout: 50 * time.Millisecond})
+	done := make(chan error, 1)
+	go func() { _, err := s.Processes(context.Background()); done <- err }()
+	select {
+	case err := <-done:
+		var ae *model.APIError
+		if !errors.As(err, &ae) || ae.Code != "unavailable" {
+			t.Fatalf("err = %v, want unavailable", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Processes did not time out")
+	}
+	// the loop must still serve snapshots afterwards
+	if _, err := s.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSamplerFirstWaitCappedBelowWriteTimeout(t *testing.T) {
+	s := NewSampler(&countingCollector{}, SamplerOptions{Interval: 30 * time.Second, Clock: newFakeClock()})
+	if s.firstWait() >= 10*time.Second {
+		t.Fatalf("firstWait = %v, must stay under the 10 s write timeout", s.firstWait())
 	}
 }

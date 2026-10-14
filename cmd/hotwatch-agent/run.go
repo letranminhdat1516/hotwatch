@@ -43,6 +43,11 @@ func openAudit(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o640)
 }
 
+type wallClock struct{}
+
+func (wallClock) Now() time.Time                         { return time.Now() }
+func (wallClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
+
 // unwiredSignaller refuses every signal until the process-signalling backend
 // is wired in.
 type unwiredSignaller struct{}
@@ -64,7 +69,7 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := checkAssigned(cfg.Listen, interfaceIPs); err != nil {
+	if err := waitAssigned(cfg.Listen, interfaceIPs, wallClock{}, log.Printf); err != nil {
 		return err
 	}
 	audit, err := openAudit(auditPath)
@@ -72,20 +77,20 @@ func cmdRun(args []string) error {
 		return fmt.Errorf("audit log: %w", err)
 	}
 	defer audit.Close()
-	return serve(cfg, audit, unwiredSignaller{})
+	return serve(cfg, *path, audit, unwiredSignaller{})
 }
 
-func serve(cfg agent.FileConfig, audit io.Writer, sig agent.Signaller) error {
+func serve(cfg agent.FileConfig, cfgPath string, audit io.Writer, sig agent.Signaller) error {
 	ln, err := net.Listen("tcp4", cfg.Listen)
 	if err != nil {
 		return err
 	}
 	probe := newDockerProbe(dockerSocket)
 	h := agent.New(agent.Config{
-		TokenSHA256: cfg.TokenSHA256,
-		ReadOnly:    cfg.ReadOnly,
-		Interval:    time.Duration(cfg.IntervalMs) * time.Millisecond,
-		Info:        hostInfo(probe, hasNvidiaSMI),
+		Token:    agent.NewTokenReloader(cfgPath, cfg.TokenSHA256, nil, log.Printf).Digest,
+		ReadOnly: cfg.ReadOnly,
+		Interval: time.Duration(cfg.IntervalMs) * time.Millisecond,
+		Info:     hostInfo(probe, hasNvidiaSMI),
 		GPU: func(ctx context.Context) ([]model.GPU, error) {
 			if !hasNvidiaSMI() {
 				return nil, nil

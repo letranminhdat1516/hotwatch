@@ -49,6 +49,23 @@ func validateListen(addr string) error {
 	return nil
 }
 
+var errNotAssigned = errors.New("listen address is not assigned to a local interface")
+
+// waitAssigned is checkAssigned, retried every 2 s for up to 60 s while the
+// address is merely not yet assigned (Tailscale may come up after the agent).
+// An invalid address fails at once.
+func waitAssigned(addr string, localIPs func() ([]net.IP, error), clk agent.Clock, logf func(string, ...any)) error {
+	deadline := clk.Now().Add(60 * time.Second)
+	for {
+		err := checkAssigned(addr, localIPs)
+		if err == nil || !errors.Is(err, errNotAssigned) || !clk.Now().Before(deadline) {
+			return err
+		}
+		logf("%v; retrying", err)
+		<-clk.After(2 * time.Second)
+	}
+}
+
 // checkAssigned re-validates addr and, for a non-loopback address, requires it
 // to be assigned to a local interface right now.
 func checkAssigned(addr string, localIPs func() ([]net.IP, error)) error {
@@ -69,7 +86,7 @@ func checkAssigned(addr string, localIPs func() ([]net.IP, error)) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("listen address %s is not assigned to a local interface", ip)
+	return fmt.Errorf("%w: %s", errNotAssigned, ip)
 }
 
 func interfaceIPs() ([]net.IP, error) {
@@ -157,6 +174,9 @@ func cmdInit(args []string, stdout, stderr io.Writer, tsIP func() (string, error
 	cfg := agent.FileConfig{Listen: listen, TokenSHA256: agent.SHA256Hex(token), ReadOnly: *readOnly, IntervalMs: agent.DefaultIntervalMs}
 	if err := agent.WriteConfig(*path, cfg, *rotate); err != nil {
 		return err
+	}
+	if *rotate {
+		fmt.Fprintln(stderr, "hotwatch-agent: the old token stops working within 5 seconds (a running agent reloads the config).")
 	}
 	fmt.Fprintf(stderr, "hotwatch-agent: wrote %s (listen %s). The token below is shown once; store it in the app.\n", *path, listen)
 	fmt.Fprintln(stdout, token)

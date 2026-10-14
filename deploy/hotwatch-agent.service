@@ -1,10 +1,10 @@
 [Unit]
+StartLimitIntervalSec=0
 Description=Hotwatch agent
 After=network-online.target docker.service tailscaled.service
 [Service]
 User=hotwatch
 Group=hotwatch
-SupplementaryGroups=docker
 ExecStart=/usr/local/bin/hotwatch-agent run --config /etc/hotwatch/agent.json
 Restart=always
 RestartSec=2

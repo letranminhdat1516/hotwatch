@@ -43,6 +43,10 @@ type Config struct {
 	GPU   func(ctx context.Context) ([]model.GPU, error)
 	Clock Clock
 
+	// Token, if set, supplies the digest per request (token rotation) and
+	// takes precedence over TokenSHA256.
+	Token func() string
+
 	// Info supplies the static host description for /v1/info. The server sets
 	// ProtocolVersion and Caps.ReadOnly itself. Nil yields a minimal HostInfo.
 	Info func() model.HostInfo
@@ -102,7 +106,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if !checkToken(r, s.cfg.TokenSHA256) {
+	digest := s.cfg.TokenSHA256
+	if s.cfg.Token != nil {
+		digest = s.cfg.Token()
+	}
+	if !checkToken(r, digest) {
 		authFailed = true
 		// A valid token is never throttled (SSH-tunnel clients all share
 		// 127.0.0.1); only invalid attempts are counted and refused.
@@ -142,7 +150,13 @@ func (s *server) snapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) processes(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.smp.Processes(r.Context())
+	// Stay inside the server's 10 s write timeout.
+	ctx, cancel := context.WithTimeout(r.Context(), handlerBudget)
+	defer cancel()
+	ps, err := s.smp.Processes(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		err = &model.APIError{Code: "unavailable", Message: "process listing timed out"}
+	}
 	if err != nil {
 		writeErr(w, err)
 		return

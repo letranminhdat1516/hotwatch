@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -14,6 +15,9 @@ const (
 	defaultIdle     = 30 * time.Second
 	sampleTimeout   = 10 * time.Second
 	firstGrace      = time.Second
+	// handlerBudget keeps waits inside the server's 10 s write timeout.
+	handlerBudget     = 8 * time.Second
+	defaultProcsLimit = 5 * time.Second
 )
 
 // Clock is the time source of the sampler (injectable for tests).
@@ -32,6 +36,8 @@ type SamplerOptions struct {
 	Interval time.Duration // sampling period; default 2 s
 	Idle     time.Duration // stop this long after the last request; default 30 s
 	Clock    Clock
+	// ProcessesTimeout bounds one Processes call; default 5 s.
+	ProcessesTimeout time.Duration
 	// GPU, if set, supplies GPUs for each snapshot. A failure leaves GPUs
 	// empty and lists "gpu" in Snapshot.Partial.
 	GPU func(ctx context.Context) ([]model.GPU, error)
@@ -74,6 +80,9 @@ func NewSampler(col collect.Collector, opt SamplerOptions) *Sampler {
 	}
 	if opt.Idle <= 0 {
 		opt.Idle = defaultIdle
+	}
+	if opt.ProcessesTimeout <= 0 {
+		opt.ProcessesTimeout = defaultProcsLimit
 	}
 	if opt.Clock == nil {
 		opt.Clock = realClock{}
@@ -119,7 +128,7 @@ func (s *Sampler) Snapshot(ctx context.Context) (model.Snapshot, error) {
 		case <-ready:
 		case <-ctx.Done():
 			return model.Snapshot{}, ctx.Err()
-		case <-s.opt.Clock.After(s.opt.Interval + firstGrace):
+		case <-s.opt.Clock.After(s.firstWait()):
 			return model.Snapshot{}, &model.APIError{Code: "unavailable", Message: "first sample not ready yet; retry"}
 		}
 	}
@@ -132,6 +141,12 @@ func (s *Sampler) Snapshot(ctx context.Context) (model.Snapshot, error) {
 		return model.Snapshot{}, &model.APIError{Code: "unavailable", Message: "sampler restarting; retry"}
 	}
 	return *s.snap, nil
+}
+
+// firstWait is how long Snapshot waits for the first sample: one interval
+// plus grace, capped below the server write timeout.
+func (s *Sampler) firstWait() time.Duration {
+	return min(s.opt.Interval+firstGrace, handlerBudget)
 }
 
 // Processes lists processes on the sampler goroutine, never overlapping a
@@ -174,7 +189,12 @@ func (s *Sampler) loop(prime bool, done chan struct{}) {
 	for {
 		select {
 		case r := <-s.reqs:
-			ps, err := s.col.Processes(r.ctx)
+			pctx, cancel := context.WithTimeout(r.ctx, s.opt.ProcessesTimeout)
+			ps, err := s.col.Processes(pctx)
+			cancel()
+			if errors.Is(err, context.DeadlineExceeded) && r.ctx.Err() == nil {
+				err = &model.APIError{Code: "unavailable", Message: "process listing timed out"}
+			}
 			r.resp <- procResp{ps, err}
 		case <-tick:
 			s.sample(true)
