@@ -22,6 +22,9 @@ type Action struct {
 	State  ActionState
 	Err    *model.APIError
 	Log    []string
+	// Seq increases on every change of the action and stamps each published
+	// snapshot; consumers keep the highest Seq per ID and drop older ones.
+	Seq uint64
 }
 
 // Runner starts actions and reports their progress.

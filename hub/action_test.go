@@ -172,7 +172,7 @@ func TestRunnerTimeout(t *testing.T) {
 		}
 		time.Sleep(2 * time.Second)
 		synctest.Wait()
-		if got := r.Get(id); got.State != "failed" || got.Err == nil {
+		if got := r.Get(id); got.State != "failed" || got.Err == nil || got.Err.Code != "timeout" || got.Err.Message != "action timed out after 70s" {
 			t.Fatalf("got %+v", got)
 		}
 	})
@@ -234,6 +234,7 @@ func TestSourceExecutorSignalParsing(t *testing.T) {
 			{Kind: "signal", HostID: "h1", Target: "42@1", Verb: "HUP"},
 			{Kind: "container", HostID: "h1", Target: "c", Verb: "pause"},
 			{Kind: "container", HostID: "h1", Target: "", Verb: "stop"},
+			{Kind: "signal", HostID: "h1", Target: "42@1", Verb: ""},
 		}
 		for _, b := range bad {
 			err := ex(context.Background(), &b, func(string) {})
@@ -268,4 +269,131 @@ func TestComposeExecutors(t *testing.T) {
 	if err := ex(context.Background(), &Action{Kind: "uninstall"}, nil); err == nil || err.Error() != "unsupported action kind" {
 		t.Fatal(err)
 	}
+}
+
+func (p *pubLog) seqsAndLast(t *testing.T, id ActionID) Action {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var prev uint64
+	var last Action
+	for _, a := range p.got {
+		if a.ID != id {
+			continue
+		}
+		if a.Seq <= prev {
+			t.Fatalf("seq %d after %d", a.Seq, prev)
+		}
+		prev, last = a.Seq, a
+	}
+	return last
+}
+
+func TestRunnerPublishOrderedWithConcurrentAndLateLogs(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := &pubLog{}
+		var late func(string)
+		exec := func(_ context.Context, _ *Action, log func(string)) error {
+			late = log
+			var wg sync.WaitGroup
+			for g := 0; g < 2; g++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for i := 0; i < 50; i++ {
+						log("x")
+					}
+				}()
+			}
+			wg.Wait()
+			return nil
+		}
+		r := NewRunner(exec, p.publish)
+		id := r.Start(Action{Kind: "package", HostID: "h1", Target: "x", State: "confirming"})
+		synctest.Wait()
+		late("too late")
+		synctest.Wait()
+		last := p.seqsAndLast(t, id)
+		if last.State != "succeeded" || len(last.Log) != 100 || r.Get(id).Seq != last.Seq {
+			t.Fatalf("last %+v (log %d)", last.State, len(last.Log))
+		}
+	})
+}
+
+func TestRunnerPanicBecomesFailedAndReleasesTarget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		n := 0
+		exec := func(context.Context, *Action, func(string)) error {
+			n++
+			if n == 1 {
+				panic("kaboom")
+			}
+			return nil
+		}
+		p := &pubLog{}
+		r := NewRunner(exec, p.publish)
+		a := Action{Kind: "package", HostID: "h1", Target: "x", State: "confirming"}
+		id := r.Start(a)
+		synctest.Wait()
+		got := r.Get(id)
+		if got.State != "failed" || got.Err == nil || got.Err.Code != "internal" || got.Err.Message != "executor panicked" {
+			t.Fatalf("got %+v", got)
+		}
+		if len(got.Log) != 1 || got.Log[0] != "executor panic: kaboom" {
+			t.Fatalf("log %v", got.Log)
+		}
+		p.seqsAndLast(t, id)
+		id2 := r.Start(a)
+		synctest.Wait()
+		if r.Get(id2).State != "succeeded" {
+			t.Fatalf("key leaked: %+v", r.Get(id2))
+		}
+	})
+}
+
+func TestRunnerRealFailureAfterStopKeepsItsError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		exec := func(ctx context.Context, _ *Action, _ func(string)) error {
+			<-ctx.Done()
+			return model.APIError{Code: "forbidden", Message: "denied"}
+		}
+		r := NewRunner(exec, func(Action) {})
+		id := r.Start(Action{Kind: "package", HostID: "h1", Target: "x", State: "confirming"})
+		synctest.Wait()
+		r.Stop()
+		if got := r.Get(id); got.State != "failed" || got.Err == nil || got.Err.Code != "forbidden" {
+			t.Fatalf("got %+v", got)
+		}
+	})
+}
+
+func TestRunnerCancelledBeforeExecNeverRunsExec(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		called := false
+		exec := func(context.Context, *Action, func(string)) error { called = true; return nil }
+		r := NewRunner(exec, func(Action) {})
+		st, ok := r.begin(Action{Kind: "signal", HostID: "h1", Target: "1@1", Verb: "KILL", State: "confirming"})
+		if !ok {
+			t.Fatal("not started")
+		}
+		r.cancelAll() // Stop raced Start: ctx is done before run begins
+		go r.run(st)
+		r.Stop()
+		if got := r.Get(st.snap.ID); got.State != "cancelled" || called {
+			t.Fatalf("got %+v called %v", got, called)
+		}
+	})
+}
+
+func TestRunnerStartAfterStopFails(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		called := false
+		r := NewRunner(func(context.Context, *Action, func(string)) error { called = true; return nil }, func(Action) {})
+		r.Stop()
+		id := r.Start(Action{Kind: "package", HostID: "h1", Target: "x", State: "confirming"})
+		synctest.Wait()
+		if got := r.Get(id); got.State != "failed" || got.Err == nil || got.Err.Code != "cancelled" || called {
+			t.Fatalf("got %+v", got)
+		}
+	})
 }

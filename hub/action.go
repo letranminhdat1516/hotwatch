@@ -27,9 +27,14 @@ type ActionRunner struct {
 	exec    Executor
 	publish func(Action)
 
+	// pubMu serialises mutate+snapshot+publish so snapshots leave in Seq
+	// order. Lock order: pubMu, then mu. publish and exec run without mu.
+	pubMu sync.Mutex
+
 	mu      sync.Mutex
 	next    ActionID
 	actions map[ActionID]*Action
+	done    map[ActionID]bool   // final state taken; late log lines are dropped
 	busy    map[string]ActionID // HostID+Target -> running action
 	cancels map[ActionID]context.CancelFunc
 	stopped bool
@@ -40,11 +45,12 @@ var _ Runner = (*ActionRunner)(nil)
 
 // NewRunner returns a runner executing actions with exec. publish receives a
 // copy of the Action on every state change and log line, from runner
-// goroutines.
+// goroutines, in Seq order per runner.
 func NewRunner(exec Executor, publish func(Action)) *ActionRunner {
 	return &ActionRunner{
 		exec: exec, publish: publish,
 		actions: map[ActionID]*Action{},
+		done:    map[ActionID]bool{},
 		busy:    map[string]ActionID{},
 		cancels: map[ActionID]context.CancelFunc{},
 	}
@@ -76,14 +82,50 @@ func toAPIError(err error) *model.APIError {
 	return apiErr("internal", err.Error())
 }
 
+// change applies f to action id under pubMu+mu, bumps Seq, and publishes the
+// snapshot. f returns false to make no change.
+func (r *ActionRunner) change(id ActionID, f func(a *Action) bool) {
+	r.pubMu.Lock()
+	defer r.pubMu.Unlock()
+	r.mu.Lock()
+	a := r.actions[id]
+	if !f(a) {
+		r.mu.Unlock()
+		return
+	}
+	a.Seq++
+	out := cloneAction(a)
+	r.mu.Unlock()
+	r.publish(out)
+}
+
+type startedAction struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	key    string
+	snap   Action
+}
+
 // Start runs a, which the caller has already confirmed (State "confirming").
 // A rejected or conflicting action is recorded as failed and not executed.
 func (r *ActionRunner) Start(a Action) ActionID {
+	st, ok := r.begin(a)
+	if !ok {
+		return st.snap.ID
+	}
+	go r.run(st)
+	return st.snap.ID
+}
+
+// begin registers a and publishes its first snapshot. ok reports that the
+// action is running and run must be started.
+func (r *ActionRunner) begin(a Action) (st startedAction, ok bool) {
+	r.pubMu.Lock()
+	defer r.pubMu.Unlock()
 	r.mu.Lock()
 	r.next++
 	a.ID = r.next
-	a.Log = nil
-	a.Err = nil
+	a.Log, a.Err = nil, nil
 	key := a.HostID + "\x00" + a.Target
 	var reject *model.APIError
 	switch {
@@ -96,58 +138,94 @@ func (r *ActionRunner) Start(a Action) ActionID {
 	}
 	if reject != nil {
 		a.State, a.Err = "failed", reject
+		a.Seq = 1
 		r.actions[a.ID] = &a
+		r.done[a.ID] = true
 		out := cloneAction(&a)
 		r.mu.Unlock()
 		r.publish(out)
-		return a.ID
+		return startedAction{snap: out}, false
 	}
 	a.State = "running"
+	a.Seq = 1
 	r.actions[a.ID] = &a
 	r.busy[key] = a.ID
 	ctx, cancel := context.WithTimeout(context.Background(), actionTimeout)
 	r.cancels[a.ID] = cancel
 	r.wg.Add(1)
-	run, out := cloneAction(&a), cloneAction(&a)
+	out := cloneAction(&a)
 	r.mu.Unlock()
-
 	r.publish(out)
-	go r.run(ctx, cancel, key, &run)
-	return run.ID
+	return startedAction{ctx: ctx, cancel: cancel, key: key, snap: cloneAction(&a)}, true
 }
 
-func (r *ActionRunner) run(ctx context.Context, cancel context.CancelFunc, key string, snap *Action) {
+func (r *ActionRunner) run(st startedAction) {
+	id := st.snap.ID
+	var final func(a *Action)
 	defer r.wg.Done()
-	id := snap.ID
-	log := func(line string) {
+	defer func() {
+		// Final state, resource release and publish happen here so a panic
+		// in the executor cannot leak the conflict key.
+		r.pubMu.Lock()
+		defer r.pubMu.Unlock()
 		r.mu.Lock()
 		a := r.actions[id]
-		a.Log = append(a.Log, line)
-		if n := len(a.Log); n > maxActionLog {
-			a.Log = append([]string(nil), a.Log[n-maxActionLog:]...)
-		}
+		final(a)
+		a.Seq++
+		r.done[id] = true
+		delete(r.busy, st.key)
+		delete(r.cancels, id)
 		out := cloneAction(a)
 		r.mu.Unlock()
 		r.publish(out)
-	}
-	err := r.exec(ctx, snap, log)
-	cancel()
+	}()
+	defer st.cancel()
 
-	r.mu.Lock()
-	a := r.actions[id]
-	switch {
-	case err == nil:
-		a.State = "succeeded"
-	case r.stopped && ctx.Err() != nil:
-		a.State = "cancelled"
-	default:
-		a.State, a.Err = "failed", toAPIError(err)
+	log := func(line string) {
+		r.change(id, func(a *Action) bool {
+			if r.done[id] {
+				return false
+			}
+			a.Log = append(a.Log, line)
+			if n := len(a.Log); n > maxActionLog {
+				a.Log = append([]string(nil), a.Log[n-maxActionLog:]...)
+			}
+			return true
+		})
 	}
-	delete(r.busy, key)
-	delete(r.cancels, id)
-	out := cloneAction(a)
-	r.mu.Unlock()
-	r.publish(out)
+
+	if ctxErr := st.ctx.Err(); ctxErr != nil {
+		final = r.finisher(nil, ctxErr, true)
+		return
+	}
+	var err error
+	func() {
+		defer func() {
+			if v := recover(); v != nil {
+				log(fmt.Sprint("executor panic: ", v))
+				err = apiErr("internal", "executor panicked")
+			}
+		}()
+		err = r.exec(st.ctx, &st.snap, log)
+	}()
+	final = r.finisher(err, st.ctx.Err(), false) // ctx.Err() is read before cancel runs
+}
+
+// finisher returns the function setting the final state. Called without
+// locks; the returned function runs under mu.
+func (r *ActionRunner) finisher(err, ctxErr error, skipped bool) func(a *Action) {
+	return func(a *Action) {
+		switch {
+		case err == nil && !skipped:
+			a.State = "succeeded"
+		case skipped && errors.Is(ctxErr, context.Canceled), errors.Is(err, context.Canceled) && errors.Is(ctxErr, context.Canceled) && r.stopped:
+			a.State = "cancelled"
+		case errors.Is(ctxErr, context.DeadlineExceeded) && (skipped || errors.Is(err, context.DeadlineExceeded)):
+			a.State, a.Err = "failed", apiErr("timeout", "action timed out after 70s")
+		default:
+			a.State, a.Err = "failed", toAPIError(err)
+		}
+	}
 }
 
 // Get returns a copy of the action, or the zero Action if id is unknown.
@@ -163,13 +241,17 @@ func (r *ActionRunner) Get(id ActionID) Action {
 // Stop cancels running actions (they end "cancelled"), waits for their
 // goroutines, and rejects later Starts.
 func (r *ActionRunner) Stop() {
+	r.cancelAll()
+	r.wg.Wait()
+}
+
+func (r *ActionRunner) cancelAll() {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.stopped = true
 	for _, c := range r.cancels {
 		c()
 	}
-	r.mu.Unlock()
-	r.wg.Wait()
 }
 
 // ComposeExecutors dispatches by Kind; unknown kinds fail.
