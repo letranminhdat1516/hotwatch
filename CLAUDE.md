@@ -1,11 +1,12 @@
 # Project context (fill in after /dev-init; the /dev-* commands read this)
-- Goal / brief: <path to brief, ticket or RFP>
-- Time budget: <e.g. 150 min total; build phase ends at minute 125> (or "none")
-- Must-show in the demo: <the flows a reviewer must see>
-- Quality metric (if any): <e.g. agreement vs reference scores, latency, accuracy>
-- Ship target: <e.g. private GitHub repo; PR to main; deploy>
-- Reviewers / share with: <names or emails>  (never invite or send without asking me)
-- Extra deliverables: <e.g. recording link, report>
+- Goal / brief: lightweight multi-host system monitor on MIT egoist/mygo (Go). Clean-room feature parity with Pulse (overview, CPU, GPU, memory, disk, network, energy/battery, processes, apps, Homebrew/mise) written from scratch, NOT translated from Pulse's decompiled code or assets; improved UI; plus user-added remote hosts (VPS) over Tailscale with process view and Docker management (list/start/stop/restart/logs). No Telegram. Brief = REQUIREMENTS.md.
+- Time budget: none (Must before Should; keep a cut order anyway)
+- Must-show in the demo: Mac overview live; add VPS host and see its metrics + processes; Docker on VPS (list, restart a container, logs); Apps + Homebrew/mise on Mac; every Pulse-parity page
+- Quality metric (if any): lightweight — low idle CPU and RSS for app and agent (targets set in REQUIREMENTS.md)
+- Ship target: private GitHub repo, PR to main; Mac .app + Linux agent binary built locally
+- Reviewers / share with: owner only  (never invite or send without asking me)
+- Extra deliverables: none
+- Infra: heavy builds/tests run on agent-box per /cicca rules (Mac is source of truth); VPS changes need my approval first
 
 # Rules for agents in this repo
 - Follow PLAN.md. Do not change contracts (types, state machine, schema, LLM interface) without asking.
