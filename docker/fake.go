@@ -9,9 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"hotwatch/model"
 )
@@ -86,13 +88,18 @@ type FakeContainer struct {
 	Labels  map[string]string
 	Ports   []FakePort
 	Created int64
+
+	StartedAt   time.Time // reported by /containers/{id}/json State.StartedAt (zero: Docker's "0001-01-01..." value)
+	Health      string    // State.Health.Status; empty means no healthcheck
+	Tty         bool      // Config.Tty; logs are then served unmultiplexed as raw-stream
+	StatsStatus int       // non-zero: /stats answers this HTTP status instead of stats
 }
 
 // FakeState is the mutable state behind NewFakeEngine's socket server.
 type FakeState struct {
 	Mu         sync.Mutex
 	Containers map[string]*FakeContainer
-	LogFrames  [][]byte // raw multiplexed frames written by the logs endpoint
+	LogFrames  [][]byte // raw multiplexed frames written by the logs endpoint; tail=N serves the last N frames; follow=1 holds the connection open afterwards until the request ends
 }
 
 const fakeAPIPrefix = "/v1.45/containers/"
@@ -170,23 +177,70 @@ func (f *FakeState) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == http.MethodPost && (op == "start" || op == "restart"):
+		already := op == "start" && c.State == "running"
 		c.State, c.Status = "running", "Up Less than a second"
+		if !already {
+			c.StartedAt = time.Now()
+		}
 		f.Mu.Unlock()
+		if already {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && op == "stop":
+		already := c.State != "running"
 		c.State, c.Status = "exited", "Exited (0) Less than a second ago"
 		f.Mu.Unlock()
+		if already {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
-	case r.Method == http.MethodGet && op == "stats":
+	case r.Method == http.MethodGet && op == "json":
+		state := map[string]any{
+			"Status":    c.State,
+			"Running":   c.State == "running",
+			"StartedAt": c.StartedAt.UTC().Format(time.RFC3339Nano),
+		}
+		if c.Health != "" {
+			state["Health"] = map[string]any{"Status": c.Health}
+		}
+		body := map[string]any{"Id": c.ID, "Name": "/" + c.Name, "State": state, "Config": map[string]any{"Tty": c.Tty}}
 		f.Mu.Unlock()
+		writeJSON(w, http.StatusOK, body)
+	case r.Method == http.MethodGet && op == "stats":
+		status := c.StatsStatus
+		f.Mu.Unlock()
+		if status != 0 {
+			writeJSON(w, status, map[string]string{"message": "stats unavailable"})
+			return
+		}
 		writeJSON(w, http.StatusOK, fakeStats())
 	case r.Method == http.MethodGet && op == "logs":
 		frames := append([][]byte(nil), f.LogFrames...)
+		tty := c.Tty
 		f.Mu.Unlock()
-		w.Header().Set("Content-Type", "application/vnd.docker.multiplexed-stream")
+		if n, err := strconv.Atoi(r.URL.Query().Get("tail")); err == nil && n >= 0 && n < len(frames) {
+			frames = frames[len(frames)-n:]
+		}
+		if tty {
+			w.Header().Set("Content-Type", "application/vnd.docker.raw-stream")
+		} else {
+			w.Header().Set("Content-Type", "application/vnd.docker.multiplexed-stream")
+		}
 		w.WriteHeader(http.StatusOK)
 		for _, fr := range frames {
+			if tty {
+				fr = fr[8:]
+			}
 			w.Write(fr)
+		}
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+		if v := r.URL.Query().Get("follow"); v == "1" || v == "true" {
+			<-r.Context().Done()
 		}
 	default:
 		f.Mu.Unlock()

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"hotwatch/model"
 )
@@ -241,5 +242,57 @@ func TestFakeEngineAPI(t *testing.T) {
 	}
 	if _, err := e.Logs(ctx, "a", 1, false); err != io.ErrUnexpectedEOF {
 		t.Fatalf("Logs err %v", err)
+	}
+}
+
+func TestFakeEngineInspectLogsFollowTail(t *testing.T) {
+	sock, f := NewFakeEngine(t)
+	c := socketClient(sock)
+	started := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	f.Mu.Lock()
+	var id string
+	for k, ct := range f.Containers {
+		id = k
+		ct.StartedAt, ct.Health = started, "healthy"
+	}
+	f.LogFrames = [][]byte{LogFrame(1, "a\n"), LogFrame(1, "b\n"), LogFrame(1, "c\n")}
+	f.Mu.Unlock()
+
+	code, body := get(t, c, "/v1.45/containers/"+id+"/json")
+	if code != 200 {
+		t.Fatalf("inspect status %d", code)
+	}
+	var in struct {
+		State struct {
+			StartedAt string
+			Health    struct{ Status string }
+		}
+		Config struct{ Tty bool }
+	}
+	if err := json.Unmarshal(body, &in); err != nil || in.State.StartedAt != "2026-10-01T08:00:00Z" ||
+		in.State.Health.Status != "healthy" || in.Config.Tty {
+		t.Fatalf("inspect %+v err %v", in, err)
+	}
+
+	_, body = get(t, c, "/v1.45/containers/"+id+"/logs?stdout=1&tail=2")
+	if string(body) != string(LogFrame(1, "b\n"))+string(LogFrame(1, "c\n")) {
+		t.Fatalf("tail body %q", body)
+	}
+
+	// follow=1 holds the connection open until the request context ends
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", "http://docker/v1.45/containers/"+id+"/logs?stdout=1&follow=1", nil)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err == nil {
+		t.Fatalf("follow stream ended on its own: %q", b)
+	}
+	if len(b) != 3*10 {
+		t.Fatalf("follow wrote %d bytes before ctx ended", len(b))
 	}
 }
