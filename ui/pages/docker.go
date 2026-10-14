@@ -154,6 +154,7 @@ func (d *Docker) Render(c *ui.Context, in DockerInput) {
 		return
 	}
 	d.ensure(in)
+	d.checkListed(in)
 	ui.Column(c).Gap(2 * g()).Children(func() {
 		if err := v.CtrsErr; err != nil {
 			components.Banner(c, components.BannerWarning, "Containers may be stale: "+err.Error())
@@ -277,16 +278,17 @@ func (d *Docker) actions(c *ui.Context, in DockerInput, ct *model.Container) {
 	}
 	ui.Column(c).Gap(2).Children(func() {
 		ui.Row(c).Gap(g()).Children(func() {
-			if ct.State != "running" {
-				if ui.Button(c, "Start").Disabled(running).Clicked() {
-					ask(string(model.ActionStart))
-				}
-			} else {
+			switch ct.State {
+			case "running", "restarting", "paused":
 				if ui.Button(c, "Stop").Disabled(running).Clicked() {
 					ask(string(model.ActionStop))
 				}
-				if ui.Button(c, "Restart").Disabled(running).Clicked() {
+				if ct.State != "paused" && ui.Button(c, "Restart").Disabled(running).Clicked() {
 					ask(string(model.ActionRestart))
+				}
+			default:
+				if ui.Button(c, "Start").Disabled(running).Clicked() {
+					ask(string(model.ActionStart))
 				}
 			}
 			if ui.Button(c, "Logs").Clicked() {
@@ -338,4 +340,20 @@ func (d *Docker) dialog(c *ui.Context, in DockerInput) {
 	if ui.AlertDialog(c, &d.ask, title, body, "Cancel", label) == 1 {
 		in.Actions.Start(hub.Action{Kind: "container", HostID: p.host, State: "confirming", Verb: p.verb, Target: p.id})
 	}
+}
+
+// checkListed stops the stream of a container that left the list; the pane
+// stays, saying so.
+func (d *Docker) checkListed(in DockerInput) {
+	p := &d.logs
+	p.mu.Lock()
+	open, gone, id := p.open, p.gone, p.id
+	p.mu.Unlock()
+	if !open || gone || slices.ContainsFunc(in.View.Ctrs, func(c model.Container) bool { return c.ID == id }) {
+		return
+	}
+	d.stopStream()
+	p.mu.Lock()
+	p.gone = true
+	p.mu.Unlock()
 }

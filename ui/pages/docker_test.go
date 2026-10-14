@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 
@@ -46,6 +47,7 @@ type fakeLogs struct {
 	mu      sync.Mutex
 	streams []*fakeStream
 	err     error
+	buf     int // channel capacity of new streams
 }
 
 type fakeStream struct {
@@ -62,7 +64,7 @@ func (f *fakeLogs) open(host, id string, tail int, follow bool) (<-chan model.Lo
 	if f.err != nil {
 		return nil, nil, f.err
 	}
-	s := &fakeStream{host: host, id: id, tail: tail, follow: follow, ch: make(chan model.LogLine)}
+	s := &fakeStream{host: host, id: id, tail: tail, follow: follow, ch: make(chan model.LogLine, f.buf)}
 	f.streams = append(f.streams, s)
 	return s.ch, func() { f.mu.Lock(); s.cancels++; f.mu.Unlock() }, nil
 }
@@ -118,6 +120,18 @@ func (e *denv) click(t *testing.T, s string) {
 	if err := e.tt.Click(s); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// ready waits until n streams were opened and the last one is connected.
+func (e *denv) ready(t *testing.T, n int) {
+	t.Helper()
+	for i := 0; i < 2000; i++ {
+		if e.logs.count() >= n && !e.page.LogsConnecting() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("stream %d never connected", n)
 }
 
 func (e *denv) refresh() { e.gen++; e.tt.Frame() }
@@ -292,6 +306,7 @@ func TestDockerLogsShowLinesAndAppend(t *testing.T) {
 	e := newDenv(fixtureCtrs())
 	e.tt.Frame()
 	e.click(t, "Logs") // alpha-web, first row
+	e.ready(t, 1)
 	s := e.logs.last()
 	if s == nil || s.id != "c3" || s.host != "h1" || s.tail != 100 || !s.follow {
 		t.Fatalf("stream %+v", s)
@@ -303,7 +318,7 @@ func TestDockerLogsShowLinesAndAppend(t *testing.T) {
 	}
 	e.send(t, ll(2, "stderr", "second line"))
 	e.waitText(t, "second line")
-	for _, want := range []string{"alpha-web", "Follow", "Clear", "100", "500", "1000"} {
+	for _, want := range []string{"alpha-web", "Following", "Clear", "100", "500", "1000"} {
 		if pos(e.tt, want) < 0 {
 			t.Fatalf("pane misses %q in %q", want, e.tt.Texts())
 		}
@@ -314,6 +329,7 @@ func TestDockerLogsPlainTextAndControlCharsReplaced(t *testing.T) {
 	e := newDenv(fixtureCtrs())
 	e.tt.Frame()
 	e.click(t, "Logs")
+	e.ready(t, 1)
 	e.send(t, ll(1, "stdout", "<b>bold</b> \x1b[31mred\x00\x07"))
 	e.waitText(t, "<b>bold</b> �[31mred��")
 }
@@ -322,6 +338,7 @@ func TestDockerLogsCancelOnClose(t *testing.T) {
 	e := newDenv(fixtureCtrs())
 	e.tt.Frame()
 	e.click(t, "Logs")
+	e.ready(t, 1)
 	e.click(t, "Close")
 	if got := e.logs.cancels(0); got != 1 {
 		t.Fatalf("cancel called %d times", got)
@@ -332,7 +349,7 @@ func TestDockerLogsCancelOnClose(t *testing.T) {
 		t.Fatal("reader still running after close")
 	case <-time.After(100 * time.Millisecond):
 	}
-	if pos(e.tt, "Follow") >= 0 {
+	if pos(e.tt, "Following") >= 0 {
 		t.Fatal("pane still open")
 	}
 }
@@ -341,8 +358,9 @@ func TestDockerLogsCancelOnSwitchContainerHostAndPage(t *testing.T) {
 	e := newDenv([]model.Container{ctr("c1", "aa", "p", "running"), ctr("c2", "bb", "p", "running")})
 	e.tt.Frame()
 	e.click(t, "Logs") // aa
-	e.tt.Frame()
+	e.ready(t, 1)
 	e.page.OpenLogs("c2")
+	e.ready(t, 2)
 	if e.logs.count() < 2 || e.logs.cancels(0) < 1 {
 		t.Fatalf("streams %d, first cancelled %d", e.logs.count(), e.logs.cancels(0))
 	}
@@ -360,6 +378,7 @@ func TestDockerLogsCancelOnSwitchContainerHostAndPage(t *testing.T) {
 	e.host = "h1"
 	e.refresh()
 	e.page.OpenLogs("c1")
+	e.ready(t, 3)
 	n := e.logs.count() - 1
 	e.page.CloseLogs()
 	if e.logs.cancels(n) != 1 {
@@ -376,18 +395,21 @@ func TestDockerLogsTailAndFollowReopen(t *testing.T) {
 	e := newDenv(fixtureCtrs())
 	e.tt.Frame()
 	e.click(t, "Logs")
+	e.ready(t, 1)
 	e.send(t, ll(1, "stdout", "old"))
 	e.waitText(t, "old")
 	e.click(t, "500")
 	e.tt.Frame()
+	e.ready(t, 2)
 	if e.logs.count() != 2 || e.logs.cancels(0) != 1 || e.logs.last().tail != 500 {
 		t.Fatalf("tail: streams=%d cancels=%d last=%+v", e.logs.count(), e.logs.cancels(0), e.logs.last())
 	}
 	if pos(e.tt, "old") >= 0 {
 		t.Fatal("old lines kept after tail change")
 	}
-	e.click(t, "Follow")
+	e.click(t, "Following")
 	e.tt.Frame()
+	e.ready(t, 3)
 	if e.logs.count() != 3 || e.logs.cancels(1) != 1 || e.logs.last().follow {
 		t.Fatalf("follow: streams=%d cancels=%d last=%+v", e.logs.count(), e.logs.cancels(1), e.logs.last())
 	}
@@ -397,6 +419,7 @@ func TestDockerLogsClear(t *testing.T) {
 	e := newDenv(fixtureCtrs())
 	e.tt.Frame()
 	e.click(t, "Logs")
+	e.ready(t, 1)
 	e.send(t, ll(1, "stdout", "gone soon"))
 	e.waitText(t, "gone soon")
 	e.click(t, "Clear")
@@ -411,25 +434,36 @@ func TestDockerLogsClear(t *testing.T) {
 
 func TestDockerLogsRingCappedAt5000(t *testing.T) {
 	e := newDenv(fixtureCtrs())
+	e.logs.buf = 6000
+	ended := make(chan struct{})
+	var once sync.Once
+	e.page.SetPost(func(f func()) {
+		f()
+		if e.page.LogsEnded() {
+			once.Do(func() { close(ended) })
+		}
+	})
 	e.tt.Frame()
 	e.click(t, "Logs")
+	e.ready(t, 1)
+	s := e.logs.last()
 	for i := 0; i < 5100; i++ {
-		e.send(t, ll(1, "stdout", fmt.Sprintf("line-%d", i)))
+		s.ch <- ll(1, "stdout", fmt.Sprintf("line-%d", i))
 	}
-	for i := 0; i < 400 && e.page.LogLen() < 5000; i++ {
-		time.Sleep(5 * time.Millisecond)
+	close(s.ch)
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream never ended")
 	}
-	// Wait for the last line to be taken.
-	e.send(t, ll(1, "stdout", "last"))
-	e.send(t, ll(1, "stdout", "last2"))
 	if n := e.page.LogLen(); n != 5000 {
 		t.Fatalf("ring holds %d lines", n)
 	}
-	if first := e.page.LogLineAt(0); first.Text == "line-0" {
-		t.Fatalf("oldest line kept: %q", first.Text)
+	if first := e.page.LogLineAt(0).Text; first != "line-100" {
+		t.Fatalf("oldest line %q", first)
 	}
-	if last := e.page.LogLineAt(e.page.LogLen() - 1); last.Text != "last" && last.Text != "last2" {
-		t.Fatalf("newest line missing: %q", last.Text)
+	if last := e.page.LogLineAt(4999).Text; last != "line-5099" {
+		t.Fatalf("newest line %q", last)
 	}
 }
 
@@ -437,6 +471,7 @@ func TestDockerLogsHostileLineStaysBounded(t *testing.T) {
 	e := newDenv(fixtureCtrs())
 	e.tt.Frame()
 	e.click(t, "Logs")
+	e.ready(t, 1)
 	e.send(t, ll(1, "stdout", strings.Repeat("x", 1<<20)))
 	e.send(t, ll(2, "stdout", "after"))
 	e.send(t, ll(3, "stdout", "after2"))
@@ -450,7 +485,8 @@ func TestDockerLogsOpenError(t *testing.T) {
 	e.logs.err = fmt.Errorf("agent offline")
 	e.tt.Frame()
 	e.click(t, "Logs")
-	e.tt.Frame()
+	e.ready(t, 0)
+	e.waitText(t, "Could not open logs: agent offline")
 	if pos(e.tt, "Could not open logs: agent offline") < 0 {
 		t.Fatalf("error not shown: %q", e.tt.Texts())
 	}
@@ -511,6 +547,10 @@ func TestAppDockerPageCancelsLogsOnPageSwitch(t *testing.T) {
 	if err := tt.Click("Logs"); err != nil {
 		t.Fatal(err)
 	}
+	for i := 0; i < 2000 && logs.count() < 1; i++ {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond) // the opener's result is delivered
 	if logs.count() != 1 {
 		t.Fatalf("streams %d", logs.count())
 	}
@@ -531,6 +571,7 @@ func TestDockerImage(t *testing.T) {
 	e := newDenv(fixtureCtrs())
 	e.tt.Frame()
 	e.click(t, "Logs")
+	e.ready(t, 1)
 	for i := 0; i < 14; i++ {
 		stream := "stdout"
 		if i%5 == 4 {
@@ -546,5 +587,97 @@ func TestDockerImage(t *testing.T) {
 	defer f.Close()
 	if err := png.Encode(f, e.tt.Image()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCleanTextIsBoundedAfterExpansion(t *testing.T) {
+	max := 16<<10 + len("…")
+	for name, in := range map[string]string{
+		"nul":  strings.Repeat("\x00", 16<<10),
+		"ff":   strings.Repeat("\xff", 16<<10),
+		"huge": strings.Repeat("\xff", 1<<20),
+		"wide": strings.Repeat("é", 1<<20),
+	} {
+		got := pages.CleanText(in)
+		if len(got) > max || !utf8.ValidString(got) {
+			t.Fatalf("%s: %d bytes, valid=%v", name, len(got), utf8.ValidString(got))
+		}
+	}
+	if got := pages.CleanText(strings.Repeat("é", 1<<20)); !strings.HasSuffix(got, "é…") {
+		t.Fatal("not cut on a rune boundary")
+	}
+}
+
+func TestCleanTextNeutralisesBidiAndBOM(t *testing.T) {
+	in := "a\u202eb\u2066c\u200fd\u061ce\ufeff"
+	if got, want := pages.CleanText(in), "a\uFFFDb\uFFFDc\uFFFDd\uFFFDe\uFFFD"; got != want {
+		t.Fatalf("%q, want %q", got, want)
+	}
+}
+
+func TestDockerButtonsForRestartingAndPausedRows(t *testing.T) {
+	for state, want := range map[string]map[string]bool{
+		"restarting": {"Start": false, "Stop": true, "Restart": true},
+		"paused":     {"Start": false, "Stop": true, "Restart": false},
+		"dead":       {"Start": true, "Stop": false, "Restart": false},
+	} {
+		e := newDenv([]model.Container{ctr("c1", "x", "p", state)})
+		e.tt.Frame()
+		for s, w := range want {
+			if got := pos(e.tt, s) >= 0; got != w {
+				t.Fatalf("%s: %q shown=%v", state, s, got)
+			}
+		}
+	}
+}
+
+func TestDockerSlowOpenerDoesNotBlockAndStaleResultIsCancelled(t *testing.T) {
+	e := newDenv(fixtureCtrs())
+	release := make(chan struct{})
+	called := make(chan struct{})
+	var mu sync.Mutex
+	cancelled := 0
+	e.page.SetLogsOpener(func(string, string, int, bool) (<-chan model.LogLine, func(), error) {
+		close(called)
+		<-release
+		return make(chan model.LogLine), func() { mu.Lock(); cancelled++; mu.Unlock() }, nil
+	})
+	e.tt.Frame()
+	start := time.Now()
+	e.click(t, "Logs")
+	<-called
+	e.tt.Frame()
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("render blocked %v", d)
+	}
+	if pos(e.tt, "Connecting…") < 0 {
+		t.Fatalf("no connecting note: %q", e.tt.Texts())
+	}
+	e.page.CloseLogs() // leave before the opener returns
+	close(release)
+	for i := 0; i < 2000; i++ {
+		mu.Lock()
+		n := cancelled
+		mu.Unlock()
+		if n == 1 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("late open result was not cancelled")
+}
+
+func TestDockerLogsContainerLeavesList(t *testing.T) {
+	e := newDenv([]model.Container{ctr("c1", "aa", "p", "running"), ctr("c2", "bb", "p", "running")})
+	e.tt.Frame()
+	e.click(t, "Logs") // aa
+	e.ready(t, 1)
+	e.view.Ctrs = []model.Container{ctr("c2", "bb", "p", "running")}
+	e.refresh()
+	if pos(e.tt, "Container no longer listed") < 0 || pos(e.tt, "aa") < 0 {
+		t.Fatalf("texts %q", e.tt.Texts())
+	}
+	if e.logs.cancels(0) != 1 {
+		t.Fatalf("cancelled %d", e.logs.cancels(0))
 	}
 }

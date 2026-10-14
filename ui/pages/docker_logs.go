@@ -44,11 +44,13 @@ type logPane struct {
 		tailIdx int
 		follow  bool
 	}
-	err    string
-	ended  bool
-	gen    uint64 // identifies the current stream; posts of older ones are dropped
-	cancel func()
-	done   chan struct{}
+	err        string
+	ended      bool
+	connecting bool   // the opener has not returned yet
+	gone       bool   // the container left the list
+	gen        uint64 // identifies the current stream; posts of older ones are dropped
+	cancel     func()
+	done       chan struct{}
 
 	buf      []model.LogLine // ring: oldest at start
 	start, n int
@@ -135,6 +137,7 @@ func (d *Docker) stopStream() {
 	p := &d.logs
 	p.mu.Lock()
 	p.gen++
+	p.connecting = false
 	cancel, done := p.cancel, p.done
 	p.cancel, p.done = nil, nil
 	p.mu.Unlock()
@@ -147,38 +150,55 @@ func (d *Docker) stopStream() {
 }
 
 // startStream (re)opens the stream for the pane's container with its tail
-// and follow settings, after cancelling the previous one.
+// and follow settings, after cancelling the previous one. The opener may do
+// network I/O, so it runs on its own goroutine; its result comes back
+// through post, and a result for a stream the pane has since left is
+// cancelled at once.
 func (d *Docker) startStream() {
 	p := &d.logs
 	d.stopStream()
 	p.mu.Lock()
 	p.clearLines()
-	p.err, p.ended = "", false
+	p.err, p.ended, p.gone = "", false, false
 	p.opened.tailIdx, p.opened.follow = p.tailIdx, p.follow
 	host, id, tail, follow := p.host, p.id, logTails[p.tailIdx], p.follow
-	p.mu.Unlock()
-	if d.opener == nil {
-		p.mu.Lock()
+	gen := p.gen
+	opener, post := d.opener, d.post
+	if opener == nil {
 		p.err = "logs are not available"
 		p.mu.Unlock()
 		return
 	}
-	lines, cancel, err := d.opener(host, id, tail, follow)
+	p.connecting = true
+	p.mu.Unlock()
+	if post == nil {
+		post = func(f func()) { f() }
+	}
+	go func() {
+		lines, cancel, err := opener(host, id, tail, follow)
+		post(func() { p.deliver(gen, lines, cancel, err, post) })
+	}()
+}
+
+// deliver takes the opener's result on the main thread.
+func (p *logPane) deliver(gen uint64, lines <-chan model.LogLine, cancel func(), err error, post func(func())) {
+	p.mu.Lock()
+	if gen != p.gen {
+		p.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		return
+	}
+	p.connecting = false
 	if err != nil {
-		p.mu.Lock()
 		p.err = err.Error()
 		p.mu.Unlock()
 		return
 	}
 	done := make(chan struct{})
-	p.mu.Lock()
-	gen := p.gen
 	p.cancel, p.done = cancel, done
 	p.mu.Unlock()
-	post := d.post
-	if post == nil {
-		post = func(f func()) { f() }
-	}
 	go p.pump(gen, lines, done, post)
 }
 
@@ -246,24 +266,30 @@ func cleanLine(l model.LogLine) model.LogLine {
 }
 
 func cleanText(s string) string {
-	truncated := false
-	if len(s) > maxLogText {
-		s, truncated = s[:maxLogText], true
+	// Each bad byte becomes a 3-byte U+FFFD, so bound the input first to
+	// keep the work small, then bound the result.
+	if len(s) > 2*maxLogText {
+		s = s[:2*maxLogText]
 	}
-	s = strings.ToValidUTF8(s, "�")
+	s = strings.ToValidUTF8(s, "\uFFFD")
 	s = strings.Map(func(r rune) rune {
 		switch {
 		case r == '\t':
 			return ' '
-		case r < 0x20, r == 0x7f, r >= 0x80 && r < 0xa0, r == 0x2028, r == 0x2029:
+		case r < 0x20, r == 0x7f, r >= 0x80 && r < 0xa0, r == 0x2028, r == 0x2029,
+			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069, r == 0x200e, r == 0x200f, r == 0x061c, r == 0xfeff:
 			return utf8.RuneError
 		}
 		return r
 	}, s)
-	if truncated {
-		s += "…"
+	if len(s) > maxLogText {
+		end := maxLogText
+		for end > 0 && !utf8.RuneStart(s[end]) {
+			end--
+		}
+		s = s[:end] + "…"
 	}
-	return s
+	return strings.Clone(s)
 }
 
 // LogTint is the colour of a log line's text: stderr in the Danger token.
@@ -287,6 +313,7 @@ func (d *Docker) logsView(c *ui.Context) {
 	t := c.Theme()
 	p.mu.Lock()
 	name, errText, ended := p.name, p.err, p.ended
+	connecting, gone := p.connecting, p.gone
 	tailIdx, follow := p.tailIdx, p.follow
 	p.mu.Unlock()
 
@@ -294,7 +321,14 @@ func (d *Docker) logsView(c *ui.Context) {
 		ui.Row(c).Gap(2 * components.Grid).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, name).FontSize(13).FontWeight(600).SingleLine()
 			ui.Segmented(c, &tailIdx, "100", "500", "1000")
-			ui.Toggle(c, &follow, "Follow")
+			label := "Follow"
+			if follow {
+				label = "Following"
+			}
+			tg := ui.Toggle(c, &follow, label)
+			if follow {
+				tg.Background(t.Accent.Alpha(0.18))
+			}
 			if ended {
 				ui.Text(c, "Stream ended").FontSize(12).TextColor(t.TextMuted).NoWrap()
 			}
@@ -319,8 +353,15 @@ func (d *Docker) logsView(c *ui.Context) {
 			ui.Text(c, "Could not open logs: "+errText).FontSize(13).TextColor(t.Danger)
 			return
 		}
+		if gone {
+			ui.Text(c, "Container no longer listed").FontSize(12).TextColor(t.TextMuted)
+		}
 		n := p.len()
-		if n == 0 {
+		if connecting {
+			ui.Text(c, "Connecting…").FontSize(12).TextColor(t.TextMuted)
+			return
+		}
+		if n == 0 && !gone {
 			ui.Text(c, "Waiting for log lines…").FontSize(12).TextColor(t.TextMuted)
 			return
 		}
