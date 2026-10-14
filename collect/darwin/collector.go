@@ -24,13 +24,16 @@ type collector struct {
 
 	prevDisk   map[string]diskCounters
 	prevDiskAt time.Time
+	apfs       map[string][]string // APFS container disk -> physical store disks
+	apfsTried  map[string]bool     // containers for which a refresh was attempted
+	apfsList   func(context.Context) ([]byte, error)
 	prevNet    map[string]netCounters
 	prevNetAt  time.Time
 }
 
 // New returns a Collector for the local Mac. Sample must not be called
 // concurrently.
-func New() collect.Collector { return &collector{now: time.Now} }
+func New() collect.Collector { return &collector{now: time.Now, apfsList: runDiskutilAPFS} }
 
 func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
 	if err := ctx.Err(); err != nil {

@@ -5,9 +5,13 @@ package darwin
 import (
 	"context"
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -180,5 +184,58 @@ func TestCPUPctCounterDecreaseKeepsPrevious(t *testing.T) {
 	}
 	if v, ok := pct(cpuLine{busy: 10, total: 100}, cpuLine{busy: 60, total: 200}); !ok || v != 50 {
 		t.Fatalf("pct = %v %v", v, ok)
+	}
+}
+
+func TestParseAPFSList(t *testing.T) {
+	data, err := os.ReadFile("testdata/apfs-list.plist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseAPFSList(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{"disk1": {"disk0"}, "disk3": {"disk0"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if _, err := parseAPFSList([]byte("not a plist")); err == nil {
+		t.Fatal("garbage accepted")
+	}
+}
+
+func TestVolumeIORatesFollowWrites(t *testing.T) {
+	c := New()
+	c.Sample(context.Background())
+	f, err := os.CreateTemp("", "hotwatch-io")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if _, err := f.Write(make([]byte, 64<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	s, _ := c.Sample(context.Background())
+	// The volume holding the temp dir is the longest mount prefix.
+	tmp, _ := filepath.EvalSymlinks(os.TempDir())
+	vol, best := -1, 0
+	for i, d := range s.Disks {
+		p := strings.TrimSuffix(d.Mount, "/") + "/"
+		if strings.HasPrefix(tmp+"/", p) && len(p) > best {
+			vol, best = i, len(p)
+		}
+	}
+	if vol < 0 {
+		t.Fatalf("no volume for %s in %+v", tmp, s.Disks)
+	}
+	d := s.Disks[vol]
+	if d.WriteBps == nil || *d.WriteBps <= 0 {
+		t.Fatalf("WriteBps for %s = %v after 64 MB write", d.Mount, d.WriteBps)
 	}
 }

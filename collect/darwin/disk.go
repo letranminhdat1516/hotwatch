@@ -42,10 +42,50 @@ func keepVolume(mount, fs string) bool {
 	return true
 }
 
-// sampleDisks lists local volumes with usage and per-disk I/O rates. Network
-// mounts are skipped (their statfs can block). It returns false when the
-// partition list is unreadable.
-func (c *collector) sampleDisks(ctx context.Context, now time.Time, out *[]model.Volume) bool {
+// physical returns the whole-disk names whose counters describe the volume
+// on device. APFS volumes map to their container's physical stores; other
+// devices are their own disk. nil means unknown.
+func (c *collector) physical(ctx context.Context, name string, io map[string]diskCounters) []string {
+	if _, ok := io[name]; ok {
+		return []string{name}
+	}
+	if stores, ok := c.apfs[name]; ok {
+		return stores
+	}
+	if !c.apfsTried[name] { // refresh once per unknown container
+		if c.apfsTried == nil {
+			c.apfsTried = map[string]bool{}
+		}
+		c.apfsTried[name] = true
+		if data, err := c.apfsList(ctx); err == nil {
+			if m, err := parseAPFSList(data); err == nil {
+				c.apfs = m
+			}
+		}
+		return c.apfs[name]
+	}
+	return nil
+}
+
+// sumIO adds the counters of names; ok is false if any is missing.
+func sumIO(m map[string]diskCounters, names []string) (diskCounters, bool) {
+	var t diskCounters
+	for _, n := range names {
+		v, ok := m[n]
+		if !ok {
+			return diskCounters{}, false
+		}
+		t.read += v.read
+		t.write += v.write
+	}
+	return t, len(names) > 0
+}
+
+// sampleDisks lists local volumes with usage and I/O rates. Network mounts
+// are skipped (their statfs can block). Volumes of one APFS container share
+// the rate of the container's physical store(s). It returns false when the
+// partition list is unreadable or a local volume's usage could not be read.
+func (c *collector) sampleDisks(ctx context.Context, at time.Time, out *[]model.Volume) bool {
 	parts, err := disk.PartitionsWithContext(ctx, true)
 	if err != nil {
 		return false
@@ -55,24 +95,28 @@ func (c *collector) sampleDisks(ctx context.Context, now time.Time, out *[]model
 	for n, s := range io {
 		cur[n] = diskCounters{read: s.ReadBytes, write: s.WriteBytes}
 	}
-	dt := now.Sub(c.prevDiskAt)
+	dt := at.Sub(c.prevDiskAt)
 	seen := map[string]bool{}
 	var vols []model.Volume
+	complete := true
 	for _, p := range parts {
 		if !keepVolume(p.Mountpoint, p.Fstype) || !strings.HasPrefix(p.Device, "/dev/") || seen[p.Mountpoint] {
 			continue
 		}
 		u, err := disk.UsageWithContext(ctx, p.Mountpoint)
 		if err != nil {
+			complete = false
 			continue
 		}
 		seen[p.Mountpoint] = true
 		v := model.Volume{Mount: p.Mountpoint, FS: p.Fstype, Total: u.Total, Used: u.Used}
-		if name := bsdName(p.Device); name != "" {
-			if prev, ok := c.prevDisk[name]; ok {
-				if now, ok := cur[name]; ok {
-					v.ReadBps = model.Rate(prev.read, now.read, dt)
-					v.WriteBps = model.Rate(prev.write, now.write, dt)
+		if name := bsdName(p.Device); name != "" && c.prevDisk != nil {
+			if stores := c.physical(ctx, name, cur); stores != nil {
+				p, ok1 := sumIO(c.prevDisk, stores)
+				n, ok2 := sumIO(cur, stores)
+				if ok1 && ok2 {
+					v.ReadBps = model.Rate(p.read, n.read, dt)
+					v.WriteBps = model.Rate(p.write, n.write, dt)
 				}
 			}
 		}
@@ -81,9 +125,9 @@ func (c *collector) sampleDisks(ctx context.Context, now time.Time, out *[]model
 	sort.Slice(vols, func(i, j int) bool { return vols[i].Mount < vols[j].Mount })
 	*out = vols
 	if ioErr == nil {
-		c.prevDisk, c.prevDiskAt = cur, now
+		c.prevDisk, c.prevDiskAt = cur, at
 	} else {
 		c.prevDisk = nil
 	}
-	return len(vols) > 0
+	return len(vols) > 0 && complete
 }
