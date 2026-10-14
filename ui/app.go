@@ -26,7 +26,12 @@ type App struct {
 	selected string
 	page     string
 	views    map[string]hub.HostView
+	gen      uint64 // bumped by Apply: pages recompute only when it changes
 	now      func() time.Time
+
+	acts      *pages.Actions
+	procs     *pages.Processes
+	onColumns func(page string, cols []string)
 
 	// Shell state: the top bar's tab index into tabKeys (the last frame's
 	// visible pages), and the split between content and host panel.
@@ -41,7 +46,13 @@ type App struct {
 // is selected and the Overview page shown.
 func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.Runner, onSelect func(hostID, page string)) *App {
 	a := &App{hosts: slices.Clone(hosts), actions: actions, onSelect: onSelect, page: "overview",
-		views: map[string]hub.HostView{}, now: time.Now, panelW: DefaultPanelWidth}
+		views: map[string]hub.HostView{}, now: time.Now, panelW: DefaultPanelWidth,
+		acts: pages.NewActions(actions), procs: pages.NewProcesses()}
+	a.procs.OnColumns = func(cols []string) {
+		if a.onColumns != nil {
+			a.onColumns("processes", cols)
+		}
+	}
 	for _, h := range a.hosts {
 		a.views[h.ID] = copyView(views(h.ID))
 	}
@@ -52,7 +63,25 @@ func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.
 }
 
 // Apply stores a copy of v for host id. Call it on the main thread.
-func (a *App) Apply(id string, v hub.HostView) { a.views[id] = copyView(v) }
+func (a *App) Apply(id string, v hub.HostView) {
+	a.views[id] = copyView(v)
+	a.gen++
+}
+
+// ApplyAction records an action snapshot published by the runner, keeping
+// the highest Seq per action. Call it on the main thread.
+func (a *App) ApplyAction(act hub.Action) { a.acts.Apply(act) }
+
+// SetColumnsHook sets the function called with a page's visible column ids,
+// in order, when the user hides, shows or moves one; the caller persists them.
+func (a *App) SetColumnsHook(f func(page string, cols []string)) { a.onColumns = f }
+
+// SetSavedColumns restores a page's saved visible columns.
+func (a *App) SetSavedColumns(page string, cols []string) {
+	if page == "processes" {
+		a.procs.SetColumns(cols)
+	}
+}
 
 // copyView detaches the snapshot and slices from the poller's data.
 // Convention: published views are never mutated in place, so pointer fields
@@ -121,6 +150,9 @@ func (a *App) View(c *ui.Context) {
 		switch a.page {
 		case "overview":
 			pages.Overview(c, v, a.now())
+		case "processes":
+			a.procs.Render(c, pages.ProcessesInput{HostID: a.selected, View: v, Gen: a.gen, Now: a.now(),
+				Width: a.split - 6*components.Grid, Actions: a.acts})
 		default:
 			components.EmptyState(c, "This page is not built yet.")
 		}
