@@ -125,6 +125,7 @@ func (c *hostKeyChecker) callback() ssh.HostKeyCallback {
 		if errors.As(err, &ke) {
 			return &HostKeyError{
 				Host:        knownhosts.Normalize(hostname),
+				Addr:        hostname,
 				Fingerprint: ssh.FingerprintSHA256(key),
 				Mismatch:    len(ke.Want) > 0,
 				Key:         key,

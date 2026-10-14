@@ -54,6 +54,9 @@ func TestUnknownThenTrustedHostKey(t *testing.T) {
 	if want := ssh.FingerprintSHA256(srv.hostKey); hk.Fingerprint != want || !strings.HasPrefix(hk.Fingerprint, "SHA256:") {
 		t.Fatalf("fingerprint = %q, want %q", hk.Fingerprint, want)
 	}
+	if want := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)); hk.Addr != want {
+		t.Fatalf("Addr = %q, want the dialed %q", hk.Addr, want)
+	}
 	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +270,7 @@ func TestPassphraseCallbackForEncryptedKey(t *testing.T) {
 	}
 	d.Close()
 	asked := ""
-	cfg.Passphrase = func(p string) (string, error) { asked = p; return "s3cret", nil }
+	cfg.Passphrase = func(_ context.Context, p string) (string, error) { asked = p; return "s3cret", nil }
 	d = NewSSH(cfg)
 	defer d.Close()
 	c, err := d.DialAgent(context.Background())
@@ -480,7 +483,7 @@ func TestSlowPassphraseDoesNotConsumeHandshakeTimeout(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := trustedConfig(t, srv)
 	srv.encryptKey("pw")
-	cfg.Passphrase = func(string) (string, error) { time.Sleep(400 * time.Millisecond); return "pw", nil }
+	cfg.Passphrase = func(context.Context, string) (string, error) { time.Sleep(400 * time.Millisecond); return "pw", nil }
 	d := NewSSH(cfg).(*sshDialer)
 	d.handshakeTimeout = 200 * time.Millisecond
 	defer d.Close()
@@ -497,7 +500,7 @@ func TestWaiterHonoursContextWhileAnotherDialRuns(t *testing.T) {
 	srv.encryptKey("pw")
 	release := make(chan struct{})
 	started := make(chan struct{})
-	cfg.Passphrase = func(string) (string, error) { close(started); <-release; return "pw", nil }
+	cfg.Passphrase = func(context.Context, string) (string, error) { close(started); <-release; return "pw", nil }
 	d := NewSSH(cfg)
 	defer d.Close()
 	first := make(chan error, 1)
@@ -543,7 +546,7 @@ func TestAgentKeyMeansNoPassphrasePrompt(t *testing.T) {
 	srv.encryptKey("pw") // KeyPath now encrypted
 	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, kr))
 	calls := 0
-	cfg.Passphrase = func(string) (string, error) { calls++; return "pw", nil }
+	cfg.Passphrase = func(context.Context, string) (string, error) { calls++; return "pw", nil }
 	d := NewSSH(cfg)
 	defer d.Close()
 	c, err := d.DialAgent(context.Background())
@@ -561,7 +564,7 @@ func TestEncryptedKeyPromptsOnceAcrossRedial(t *testing.T) {
 	cfg := trustedConfig(t, srv)
 	srv.encryptKey("pw")
 	calls := 0
-	cfg.Passphrase = func(string) (string, error) { calls++; return "pw", nil }
+	cfg.Passphrase = func(context.Context, string) (string, error) { calls++; return "pw", nil }
 	d := NewSSH(cfg)
 	defer d.Close()
 	c, err := d.DialAgent(context.Background())
@@ -585,7 +588,7 @@ func TestDeclinedPassphraseIsNotFatalAndNotRepeated(t *testing.T) {
 	cfg := trustedConfig(t, srv)
 	srv.encryptKey("pw")
 	calls := 0
-	cfg.Passphrase = func(string) (string, error) { calls++; return "", errors.New("declined") }
+	cfg.Passphrase = func(context.Context, string) (string, error) { calls++; return "", errors.New("declined") }
 	d := NewSSH(cfg)
 	defer d.Close()
 	_, err := d.DialAgent(context.Background())
@@ -716,7 +719,7 @@ func TestSpoofedDisconnectBeforeHostKeyDoesNotPrompt(t *testing.T) {
 	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "kh"))
 	cfg.Host, cfg.Port = host, port
 	calls := 0
-	cfg.Passphrase = func(string) (string, error) { calls++; return "pw", nil }
+	cfg.Passphrase = func(context.Context, string) (string, error) { calls++; return "pw", nil }
 	d := NewSSH(cfg)
 	defer d.Close()
 	_, err := d.DialAgent(context.Background())
@@ -742,7 +745,7 @@ func TestRealAuthFailureAfterVerifiedHostKeyPromptsOnce(t *testing.T) {
 	cfg.KeyPath = filepath.Join(t.TempDir(), "foreign")
 	os.WriteFile(cfg.KeyPath, pem.EncodeToMemory(block), 0o600)
 	calls := 0
-	cfg.Passphrase = func(string) (string, error) { calls++; return "pw", nil }
+	cfg.Passphrase = func(context.Context, string) (string, error) { calls++; return "pw", nil }
 	d := NewSSH(cfg)
 	defer d.Close()
 	if _, err := d.DialAgent(context.Background()); err == nil {
@@ -757,7 +760,7 @@ func TestCloseClearsDecryptedSigners(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := trustedConfig(t, srv)
 	srv.encryptKey("pw")
-	cfg.Passphrase = func(string) (string, error) { return "pw", nil }
+	cfg.Passphrase = func(context.Context, string) (string, error) { return "pw", nil }
 	d := NewSSH(cfg).(*sshDialer)
 	c, err := d.DialAgent(context.Background())
 	if err != nil {
@@ -785,7 +788,7 @@ func TestDeclinedPassphraseThenAgentKeyConnectsWithoutPrompt(t *testing.T) {
 	kr := agent.NewKeyring()
 	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, kr))
 	calls := 0
-	cfg.Passphrase = func(string) (string, error) { calls++; return "", errors.New("declined") }
+	cfg.Passphrase = func(context.Context, string) (string, error) { calls++; return "", errors.New("declined") }
 	d := NewSSH(cfg)
 	defer d.Close()
 	if _, err := d.DialAgent(context.Background()); err == nil || !strings.Contains(err.Error(), "authenticate") {
@@ -813,7 +816,7 @@ func TestCloseDuringInFlightDialClearsSigners(t *testing.T) {
 	srv.encryptKey("pw")
 	started := make(chan struct{})
 	release := make(chan struct{})
-	cfg.Passphrase = func(string) (string, error) { close(started); <-release; return "pw", nil }
+	cfg.Passphrase = func(context.Context, string) (string, error) { close(started); <-release; return "pw", nil }
 	d := NewSSH(cfg).(*sshDialer)
 	d.closeWait = 50 * time.Millisecond
 	done := make(chan error, 1)
@@ -836,5 +839,39 @@ func TestCloseDuringInFlightDialClearsSigners(t *testing.T) {
 	}
 	if len(d.decrypted) != 0 || d.prompted != nil {
 		t.Fatalf("cache not cleared: %d signers, prompted=%v", len(d.decrypted), d.prompted)
+	}
+}
+
+// The passphrase prompt gets the dial's ctx: a caller that gives up (host
+// removed or replaced) ends the prompt instead of leaving it waiting.
+func TestPassphrasePromptEndsWithDialCtx(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	started := make(chan struct{})
+	ended := make(chan error, 1)
+	cfg.Passphrase = func(ctx context.Context, _ string) (string, error) {
+		close(started)
+		<-ctx.Done()
+		ended <- ctx.Err()
+		return "", ctx.Err()
+	}
+	d := NewSSH(cfg)
+	defer d.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	res := make(chan error, 1)
+	go func() { _, err := d.DialAgent(ctx); res <- err }()
+	<-started
+	cancel()
+	select {
+	case err := <-ended:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("prompt ctx err %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt not ended by the dial ctx")
+	}
+	if err := <-res; err == nil {
+		t.Fatal("cancelled dial succeeded")
 	}
 }

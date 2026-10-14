@@ -40,8 +40,9 @@ type SSHConfig struct {
 	// one TrustHostKey writes.
 	AppKnownHosts string
 	// Passphrase is asked for when a key file is encrypted. Nil skips such keys.
-	// Passphrases are never stored or logged.
-	Passphrase func(keyPath string) (string, error)
+	// ctx is the dial's: it is done when the caller gives up, and the prompt
+	// should then end. Passphrases are never stored or logged.
+	Passphrase func(ctx context.Context, keyPath string) (string, error)
 }
 
 // sshSession is one live *ssh.Client plus what must be released with it.
@@ -222,7 +223,10 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 	added := false
 	for _, k := range encrypted {
 		d.prompted[k.path] = true // never ask twice, even if declined
-		pass, perr := cfg.Passphrase(k.path)
+		pass, perr := cfg.Passphrase(ctx, k.path)
+		if ctx.Err() != nil {
+			break
+		}
 		if perr != nil {
 			log.Printf("ssh: passphrase for %s not provided: %v", k.path, perr)
 			continue

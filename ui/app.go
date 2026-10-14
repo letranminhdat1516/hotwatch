@@ -37,7 +37,8 @@ type App struct {
 
 	notice   string                // SetNotice; "" when dismissed
 	onFrame  func(start time.Time) // SetFrameHook
-	prompts  []passPrompt          // AskPassphrase queue; the first is shown
+	prompts  []*passPrompt         // AskPassphrase queue; the first is shown
+	onRetry  func(hostID string)   // SetRetry
 	pass     string                // the shown prompt's input
 	passOpen bool
 

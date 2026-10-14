@@ -17,7 +17,8 @@ type Dialer interface {
 
 // HostKeyError reports an SSH host key that is unknown or has changed.
 type HostKeyError struct {
-	Host        string
+	Host        string        // known_hosts form: "host" or "[host]:port"
+	Addr        string        // "host:port" exactly as dialed; trust binds to this
 	Fingerprint string        // "SHA256:…"
 	Mismatch    bool          // true = key changed (hard stop); false = unknown (ask user)
 	Key         ssh.PublicKey // the key the server presented; pass it to TrustHostKey after approval

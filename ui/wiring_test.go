@@ -117,3 +117,41 @@ func TestFrameHookSeesEachFrameStart(t *testing.T) {
 		t.Fatalf("frame hook calls %v", starts)
 	}
 }
+
+func TestPassphrasePromptCancelledByCaller(t *testing.T) {
+	app := testApp(hub.HostView{})
+	called := false
+	cancel := app.AskPassphrase("/k/id_gone", func(string, bool) { called = true })
+	tt := ui.NewTester(app.View, 1200, 800)
+	if !tt.HasText("/k/id_gone") {
+		t.Fatalf("prompt not shown: %q", tt.Texts())
+	}
+	cancel()
+	cancel() // idempotent
+	tt.Frame()
+	if tt.HasText("/k/id_gone") || tt.HasText("Unlock SSH key") || called {
+		t.Fatalf("cancelled prompt still shown (%v) or answered (%v)", tt.Texts(), called)
+	}
+}
+
+func TestRetryButtonOnFailedHost(t *testing.T) {
+	app := testApp(hub.HostView{Conn: hub.Conn{State: hub.Unauthorized}})
+	tt := ui.NewTester(app.View, 1200, 800)
+	if tt.HasText("Retry") {
+		t.Fatal("Retry shown without a retry hook")
+	}
+	var got []string
+	app.SetRetry(func(id string) { got = append(got, id) })
+	tt.Frame()
+	if err := tt.Click("Retry"); err != nil {
+		t.Fatalf("%v: %q", err, tt.Texts())
+	}
+	if !slices.Equal(got, []string{"h1"}) {
+		t.Fatalf("retried %v", got)
+	}
+	online := testApp(hub.HostView{Conn: hub.Conn{State: hub.Online}})
+	online.SetRetry(func(string) {})
+	if ui.NewTester(online.View, 1200, 800).HasText("Retry") {
+		t.Fatal("Retry shown on an online host")
+	}
+}

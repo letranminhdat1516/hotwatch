@@ -96,7 +96,10 @@ func Shell(c *ui.Context, a *App, hostPanel func(c *ui.Context), content func())
 					ui.Text(c, title).FontSize(22).FontWeight(700)
 					a.noticeBanner(c)
 					if kind, text, ok := banner(v.Conn, now); ok {
-						components.Banner(c, kind, text)
+						ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
+							components.Banner(c, kind, text).Grow(1)
+							a.retryButton(c, v.Conn.State)
+						})
 					}
 					content()
 				})

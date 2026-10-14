@@ -7,8 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,7 +50,7 @@ func appPaths(home string) paths {
 type sourceEnv struct {
 	Secrets    store.Secrets
 	Paths      paths
-	Passphrase func(keyPath string) (string, error)
+	Passphrase func(ctx context.Context, keyPath string) (string, error)
 	Local      func() source.Source
 }
 
@@ -71,6 +73,33 @@ func (f failing) ContainerAction(context.Context, string, model.ContainerAction)
 }
 func (f failing) ContainerLogs(context.Context, string, int, bool) (<-chan model.LogLine, error) {
 	return nil, f.err
+}
+
+// pending stands in for an agent host until its token has been read off the
+// main thread: polls wait (the host stays Connecting) until ReplaceSource
+// cancels them; actions fail at once.
+type pending struct{}
+
+var errPending = &model.APIError{Code: "unavailable", Message: "connecting"}
+
+func (pending) Info(ctx context.Context) (model.HostInfo, error) {
+	<-ctx.Done()
+	return model.HostInfo{}, ctx.Err()
+}
+func (pending) Snapshot(ctx context.Context) (model.Snapshot, error) {
+	<-ctx.Done()
+	return model.Snapshot{}, ctx.Err()
+}
+func (pending) Processes(context.Context) ([]model.Process, error) { return nil, errPending }
+func (pending) Signal(context.Context, int32, time.Time, model.Signal) error {
+	return errPending
+}
+func (pending) Containers(context.Context) ([]model.Container, error) { return nil, errPending }
+func (pending) ContainerAction(context.Context, string, model.ContainerAction) error {
+	return errPending
+}
+func (pending) ContainerLogs(context.Context, string, int, bool) (<-chan model.LogLine, error) {
+	return nil, errPending
 }
 
 // buildSource returns the source for h and the dialer to close with it (nil
@@ -191,6 +220,7 @@ type configStore struct {
 	cfg     store.Config
 	timer   *time.Timer
 	pending bool
+	closed  bool // after Close, column changes are ignored
 }
 
 func newConfigStore(path string, cfg store.Config, log *slog.Logger) *configStore {
@@ -220,6 +250,9 @@ func (s *configStore) Save(c store.Config) error {
 func (s *configStore) SetColumns(page string, cols []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
 	m := maps.Clone(s.cfg.Settings.Columns)
 	if m == nil {
 		m = map[string][]string{}
@@ -231,6 +264,14 @@ func (s *configStore) SetColumns(page string, cols []string) {
 		s.timer.Stop()
 	}
 	s.timer = time.AfterFunc(s.debounce, s.Flush)
+}
+
+// Close writes a pending column change and ignores later ones.
+func (s *configStore) Close() {
+	s.Flush()
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 }
 
 // Flush writes a pending column change now.
@@ -377,7 +418,8 @@ type appUI interface {
 	SetSavedColumns(page string, cols []string)
 	SetFrameHook(f func(start time.Time))
 	SetNotice(text string)
-	AskPassphrase(keyPath string, reply func(pass string, ok bool))
+	AskPassphrase(keyPath string, reply func(pass string, ok bool)) (cancel func())
+	SetRetry(f func(hostID string))
 }
 
 // core is the running application behind the window: hub, runner, sources
@@ -444,6 +486,7 @@ func (c *core) attach(app appUI, warn store.Warning) {
 		app.SetSavedColumns(page, cols)
 	}
 	app.SetFrameHook(c.times.frame)
+	app.SetRetry(c.retry)
 	if warn != "" {
 		app.SetNotice(string(warn))
 	}
@@ -459,16 +502,70 @@ func (c *core) source(h store.Host) (source.Source, io.Closer) {
 	return src, cl
 }
 
-// startHub builds every host's source and starts polling. Call it on the
-// main thread once the window exists.
+// startHub starts polling. Call it on the main thread once the window
+// exists. Only This Mac's source is built here; agent hosts start on a
+// placeholder and get theirs from the edit queue, so the first frame never
+// waits on the Keychain.
 func (c *core) startHub() {
 	srcs := map[string]source.Source{}
 	for _, h := range c.cfg.Config().Hosts {
-		src, cl := c.source(h)
+		src, cl := source.Source(pending{}), io.Closer(nil)
+		if h.Kind == "local" {
+			src, cl = c.source(h)
+		}
 		c.reg.set(h.ID, src, cl)
 		srcs[h.ID] = src
 	}
 	c.useHub(hub.New(srcs, c.interval(), c.publish))
+	c.buildAgents()
+}
+
+// buildAgents queues building every agent host's source.
+func (c *core) buildAgents() {
+	for _, h := range c.cfg.Config().Hosts {
+		if h.Kind != "local" {
+			c.rebuild(h.ID)
+		}
+	}
+}
+
+// rebuild queues building id's source from the saved configuration (reading
+// its token again) and swapping it in; the old dialer is closed. A host no
+// longer configured is left alone.
+func (c *core) rebuild(id string) {
+	c.queue.do(func() {
+		i := slices.IndexFunc(c.cfg.Config().Hosts, func(h store.Host) bool { return h.ID == id })
+		if i < 0 {
+			return
+		}
+		src, cl := c.source(c.cfg.Config().Hosts[i])
+		old := c.reg.set(id, src, cl)
+		c.hub.ReplaceSource(id, src)
+		closeQuietly(old)
+	})
+}
+
+// retry connects to id again. An agent host gets a new source, so a token
+// that could not be read (a locked Keychain) is read again.
+func (c *core) retry(id string) {
+	h, ok := c.host(id)
+	if !ok {
+		return
+	}
+	if h.Kind == "local" {
+		c.hub.Retry(id)
+		return
+	}
+	c.rebuild(id)
+}
+
+func (c *core) host(id string) (store.Host, bool) {
+	hs := c.cfg.Config().Hosts
+	i := slices.IndexFunc(hs, func(h store.Host) bool { return h.ID == id })
+	if i < 0 {
+		return store.Host{}, false
+	}
+	return hs[i], true
 }
 
 // useHub adopts h and tells it the selection and the visible hosts.
@@ -512,15 +609,24 @@ func (c *core) openLogs(hostID, ctrID string, tail int, follow bool) (<-chan mod
 var errPromptCancelled = errors.New("passphrase entry cancelled")
 
 // passphrase asks the user for an SSH key's passphrase. It runs on a dialer
-// goroutine and waits for the prompt the main thread shows.
-func (c *core) passphrase(keyPath string) (string, error) {
+// goroutine and waits for the prompt the main thread shows. When ctx ends
+// (the host was removed or replaced) the prompt is withdrawn.
+func (c *core) passphrase(ctx context.Context, keyPath string) (string, error) {
 	type answer struct {
 		pass string
 		ok   bool
 	}
 	ch := make(chan answer, 1)
-	c.post(func() { c.app.AskPassphrase(keyPath, func(p string, ok bool) { ch <- answer{p, ok} }) })
+	var withdraw func() // main thread only; posts run in order
+	c.post(func() { withdraw = c.app.AskPassphrase(keyPath, func(p string, ok bool) { ch <- answer{p, ok} }) })
 	select {
+	case <-ctx.Done():
+		c.post(func() {
+			if withdraw != nil {
+				withdraw()
+			}
+		})
+		return "", ctx.Err()
 	case a := <-ch:
 		if !a.ok {
 			return "", errPromptCancelled
@@ -543,7 +649,7 @@ func (c *core) shutdown() {
 		if c.hub != nil {
 			c.hub.Stop()
 		}
-		c.cfg.Flush()
+		c.cfg.Close()
 		for _, cl := range c.reg.closeAll() {
 			closeQuietly(cl)
 		}
@@ -564,24 +670,39 @@ func (e *effects) SetToken(hostID, token string) error {
 	return e.c.secrets.Set(store.TokenKey(hostID), token)
 }
 
+var errAddrChanged = errors.New("host address changed since the key was shown — reconnect and verify again")
+
+// TrustHostKey records the key for the address it was seen at, never for the
+// host's current settings: if those changed since, it refuses.
 func (e *effects) TrustHostKey(hostID string, hk *transport.HostKeyError) error {
-	i := slices.IndexFunc(e.c.cfg.Config().Hosts, func(h store.Host) bool { return h.ID == hostID })
-	if i < 0 {
+	h, ok := e.c.host(hostID)
+	if !ok {
 		return fmt.Errorf("unknown host %q", hostID)
 	}
-	conn := e.c.cfg.Config().Hosts[i].Conn
+	conn := h.Conn
 	if conn == nil || conn.Type != "ssh" {
 		return fmt.Errorf("host %q does not connect over SSH", hostID)
 	}
-	port := conn.SSHPort
-	if port == 0 {
-		port = 22
+	host, portS, err := net.SplitHostPort(hk.Addr)
+	if err != nil {
+		return fmt.Errorf("the host key carries no dialed address: %w", errAddrChanged)
+	}
+	port, err := strconv.Atoi(portS)
+	if err != nil {
+		return fmt.Errorf("the host key's address %q has no port: %w", hk.Addr, errAddrChanged)
+	}
+	cur := conn.SSHPort
+	if cur == 0 {
+		cur = 22
+	}
+	if host != conn.SSHHost || port != cur {
+		return errAddrChanged
 	}
 	p := e.c.env.Paths
-	if err := transport.TrustHostKey(p.AppKnownHosts, conn.SSHHost, port, hk.Key, hk.Fingerprint, p.UserKnownHosts); err != nil {
+	if err := transport.TrustHostKey(p.AppKnownHosts, host, port, hk.Key, hk.Fingerprint, p.UserKnownHosts); err != nil {
 		return err
 	}
-	e.c.hub.Retry(hostID)
+	e.c.retry(hostID)
 	return nil
 }
 
@@ -604,12 +725,7 @@ func (e *effects) HostAdded(h store.Host) {
 func (e *effects) HostChanged(h store.Host) {
 	c := e.c
 	if h.Kind != "local" { // This Mac's settings are only its name
-		c.queue.do(func() {
-			src, cl := c.source(h)
-			old := c.reg.set(h.ID, src, cl)
-			c.hub.ReplaceSource(h.ID, src)
-			closeQuietly(old)
-		})
+		c.rebuild(h.ID)
 	}
 	e.hostsChanged()
 }

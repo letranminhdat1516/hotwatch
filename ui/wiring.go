@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"hotwatch/hub"
 	"hotwatch/store"
 	"hotwatch/ui/components"
 )
@@ -62,11 +63,41 @@ type passPrompt struct {
 }
 
 // AskPassphrase queues a prompt for the passphrase of an encrypted SSH key.
-// reply is called once, on the main thread: with the passphrase and true, or
-// with "" and false when the user cancels. The passphrase is held only until
-// reply is called.
-func (a *App) AskPassphrase(keyPath string, reply func(pass string, ok bool)) {
-	a.prompts = append(a.prompts, passPrompt{keyPath: keyPath, reply: reply})
+// reply is called at most once, on the main thread: with the passphrase and
+// true, or with "" and false when the user cancels. The returned cancel
+// withdraws the prompt without calling reply (the dial gave up); call it on
+// the main thread. The passphrase is held only until reply is called.
+func (a *App) AskPassphrase(keyPath string, reply func(pass string, ok bool)) (cancel func()) {
+	p := &passPrompt{keyPath: keyPath, reply: reply}
+	a.prompts = append(a.prompts, p)
+	return func() {
+		i := slices.Index(a.prompts, p)
+		if i < 0 {
+			return
+		}
+		if i == 0 {
+			a.pass, a.passOpen = "", false
+		}
+		a.prompts = slices.Delete(a.prompts, i, i+1)
+	}
+}
+
+// SetRetry sets what the Retry button of a host that is offline, not
+// authorized or incompatible does. Without one there is no button.
+func (a *App) SetRetry(f func(hostID string)) { a.onRetry = f }
+
+// retryButton offers Retry for a host whose connection stopped trying, or
+// is backing off.
+func (a *App) retryButton(c *ui.Context, st hub.ConnState) {
+	if a.onRetry == nil {
+		return
+	}
+	switch st {
+	case hub.Offline, hub.Unauthorized, hub.Incompatible:
+		if ui.Button(c, "Retry").Clicked() {
+			a.onRetry(a.selected)
+		}
+	}
 }
 
 func (a *App) noticeBanner(c *ui.Context) {

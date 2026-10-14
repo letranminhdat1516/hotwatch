@@ -103,6 +103,8 @@ type fakeApp struct {
 	closed    int
 	prompts   []string
 	answer    func(keyPath string) (string, bool)
+	withdrawn []string
+	retry     func(string)
 }
 
 func newFakeApp() *fakeApp {
@@ -127,12 +129,14 @@ func (a *fakeApp) SetColumnsHook(f func(string, []string))    { a.colHook = f }
 func (a *fakeApp) SetSavedColumns(page string, cols []string) { a.columns[page] = cols }
 func (a *fakeApp) SetFrameHook(f func(time.Time))             { a.frameHook = f }
 func (a *fakeApp) SetNotice(s string)                         { a.notice = s }
-func (a *fakeApp) AskPassphrase(k string, reply func(string, bool)) {
+func (a *fakeApp) AskPassphrase(k string, reply func(string, bool)) func() {
 	a.prompts = append(a.prompts, k)
 	if a.answer != nil {
 		reply(a.answer(k))
 	}
+	return func() { a.withdrawn = append(a.withdrawn, k) }
 }
+func (a *fakeApp) SetRetry(f func(string)) { a.retry = f }
 
 type hubCall struct{ op, id string }
 
@@ -161,6 +165,9 @@ func (h *fakeHub) RemoveHost(id string) { h.rec("remove", id) }
 func (h *fakeHub) ReplaceSource(id string, s source.Source) {
 	h.rec("replace", id)
 	h.mu.Lock()
+	if h.srcs == nil {
+		h.srcs = map[string]source.Source{}
+	}
 	h.srcs[id] = s
 	h.mu.Unlock()
 }
@@ -256,7 +263,7 @@ func TestBuildSourceSSH(t *testing.T) {
 	sec := store.NewMemSecrets()
 	sec.Set(store.TokenKey("h1"), testToken)
 	h := sshHost("h1")
-	src, cl, err := buildSource(h, sourceEnv{Secrets: sec, Paths: p, Passphrase: func(string) (string, error) { return "", nil }})
+	src, cl, err := buildSource(h, sourceEnv{Secrets: sec, Paths: p, Passphrase: func(context.Context, string) (string, error) { return "", nil }})
 	if err != nil || src == nil || cl == nil {
 		t.Fatalf("buildSource(ssh) = %v %v %v", src, cl, err)
 	}
@@ -316,7 +323,6 @@ func TestMissingTokenIsUnauthorizedWithoutDialing(t *testing.T) {
 	if !errors.As(ierr, &api) || api.Message != "token missing" || hub.Classify(ierr) != hub.EvUnauthorized || hub.Classify(serr) != hub.EvUnauthorized {
 		t.Fatalf("Info err %v, Snapshot err %v", ierr, serr)
 	}
-	time.Sleep(50 * time.Millisecond)
 	if n := accepted.Load(); n != 0 {
 		t.Fatalf("dialed %d times without a token", n)
 	}
@@ -459,10 +465,17 @@ func TestColumnsSaveDebounced(t *testing.T) {
 	if _, err := os.Stat(p.Config); !os.IsNotExist(err) {
 		t.Fatalf("saved before the quiet period: %v", err)
 	}
-	time.Sleep(150 * time.Millisecond)
-	got, _, _ := store.Load(p.Config)
-	if !slices.Equal(got.Settings.Columns["processes"], []string{"a", "b"}) {
-		t.Fatalf("saved columns %v", got.Settings.Columns)
+	var got store.Config
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, _, _ = store.Load(p.Config)
+		if slices.Equal(got.Settings.Columns["processes"], []string{"a", "b"}) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("saved columns %v", got.Settings.Columns)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	// The panel's copy has stale (nil) columns; the store keeps its own.
 	next := store.Default()
@@ -600,11 +613,11 @@ func TestEffectsTrustHostKey(t *testing.T) {
 	e := newEffEnv(t, c)
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	key, _ := ssh.NewPublicKey(pub)
-	hk := &transport.HostKeyError{Host: "box.test", Fingerprint: ssh.FingerprintSHA256(key), Key: key}
+	hk := &transport.HostKeyError{Host: "[box.test]:2222", Addr: "box.test:2222", Fingerprint: ssh.FingerprintSHA256(key), Key: key}
 
 	bad := *hk
 	bad.Fingerprint = "SHA256:not-it"
-	if err := e.w.effects().TrustHostKey("h1", &bad); err == nil || e.has("retry", "h1") {
+	if err := e.w.effects().TrustHostKey("h1", &bad); err == nil || e.has("replace", "h1") {
 		t.Fatalf("mismatched fingerprint: err %v, calls %v", err, e.hub.got())
 	}
 	if err := e.w.effects().TrustHostKey("h1", hk); err != nil {
@@ -617,13 +630,182 @@ func TestEffectsTrustHostKey(t *testing.T) {
 	if _, err := os.Stat(e.p.UserKnownHosts); !os.IsNotExist(err) {
 		t.Fatal("~/.ssh/known_hosts was written")
 	}
-	if !e.has("retry", "h1") {
+	if lines := bytes.Count(b, []byte("\n")); lines != 1 {
+		t.Fatalf("known_hosts has %d lines: %q", lines, b)
+	}
+	e.w.queue.flush()
+	if !e.has("replace", "h1") {
 		t.Fatalf("host not retried: %v", e.hub.got())
 	}
 	if err := e.w.effects().TrustHostKey("nope", hk); err == nil {
 		t.Fatal("unknown host accepted")
 	}
 }
+
+// The default SSH port is bound too: the entry is the bare host name.
+func TestTrustHostKeyDefaultPort(t *testing.T) {
+	c := store.Default()
+	h := sshHost("h1")
+	h.Conn.SSHPort = 0
+	c.Hosts = append(c.Hosts, h)
+	e := newEffEnv(t, c)
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	key, _ := ssh.NewPublicKey(pub)
+	hk := &transport.HostKeyError{Host: "box.test", Addr: "box.test:22", Fingerprint: ssh.FingerprintSHA256(key), Key: key}
+	if err := e.w.effects().TrustHostKey("h1", hk); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(e.p.AppKnownHosts)
+	if !bytes.HasPrefix(b, []byte("box.test ")) {
+		t.Fatalf("known_hosts %q", b)
+	}
+}
+
+// A key shown for one address is never trusted for another: an edit between
+// the prompt and Trust refuses, and nothing is written.
+func TestTrustHostKeyRefusedAfterAddressEdit(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	key, _ := ssh.NewPublicKey(pub)
+	hk := &transport.HostKeyError{Host: "[box.test]:2222", Addr: "box.test:2222", Fingerprint: ssh.FingerprintSHA256(key), Key: key}
+	for name, edit := range map[string]func(*store.Conn){
+		"host": func(c *store.Conn) { c.SSHHost = "other.test" },
+		"port": func(c *store.Conn) { c.SSHPort = 2200 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := store.Default()
+			c.Hosts = append(c.Hosts, sshHost("h1"))
+			e := newEffEnv(t, c)
+			edited := sshHost("h1")
+			edit(edited.Conn)
+			c.Hosts[1] = edited
+			if err := e.w.effects().SaveConfig(c); err != nil {
+				t.Fatal(err)
+			}
+			err := e.w.effects().TrustHostKey("h1", hk)
+			if err == nil || !strings.Contains(err.Error(), "address changed") {
+				t.Fatalf("err = %v", err)
+			}
+			if _, err := os.Stat(e.p.AppKnownHosts); !os.IsNotExist(err) {
+				t.Fatal("known_hosts written for an edited address")
+			}
+			e.w.queue.flush()
+			if e.has("replace", "h1") {
+				t.Fatal("host retried after a refused trust")
+			}
+		})
+	}
+	// An error without the dialed address cannot be bound: refused.
+	c := store.Default()
+	c.Hosts = append(c.Hosts, sshHost("h1"))
+	e := newEffEnv(t, c)
+	noAddr := *hk
+	noAddr.Addr = ""
+	if err := e.w.effects().TrustHostKey("h1", &noAddr); err == nil {
+		t.Fatal("trusted a key without its dialed address")
+	}
+}
+
+// flakySecrets fails Get until fixed, like a Keychain locked at launch.
+type flakySecrets struct {
+	*store.MemSecrets
+	mu     sync.Mutex
+	broken bool
+	gate   chan struct{} // non-nil: Get waits for it
+	gets   atomic.Int32
+}
+
+func (s *flakySecrets) Get(k string) (string, error) {
+	s.gets.Add(1)
+	if s.gate != nil {
+		<-s.gate
+	}
+	s.mu.Lock()
+	broken := s.broken
+	s.mu.Unlock()
+	if broken {
+		return "", errors.New("keychain locked")
+	}
+	return s.MemSecrets.Get(k)
+}
+
+func isFailing(s source.Source) bool { _, ok := s.(failing); return ok }
+
+// Retry rebuilds the host's source, so a Keychain that was locked is read again.
+func TestRetryRereadsKeychain(t *testing.T) {
+	_, _ = stubSSH(t)
+	c := store.Default()
+	c.Hosts = append(c.Hosts, sshHost("h1"))
+	sec := &flakySecrets{MemSecrets: store.NewMemSecrets(), broken: true}
+	sec.MemSecrets.Set(store.TokenKey("h1"), testToken)
+	w := newCore(c, testPaths(t), sec, localFake, func(f func()) { f() }, slog.New(slog.DiscardHandler))
+	app := newFakeApp()
+	w.attach(app, "")
+	fh := &fakeHub{}
+	w.useHub(fh)
+	t.Cleanup(w.shutdown)
+	w.buildAgents()
+	w.queue.flush()
+	src, _ := w.lookup("h1")
+	var api *model.APIError
+	if _, err := src.Info(context.Background()); !errors.As(err, &api) || api.Code != "unauthorized" {
+		t.Fatalf("locked keychain: %v", err)
+	}
+	sec.mu.Lock()
+	sec.broken = false
+	sec.mu.Unlock()
+	if app.retry == nil {
+		t.Fatal("no Retry hook on the app")
+	}
+	app.retry("h1")
+	w.queue.flush()
+	if src, _ := w.lookup("h1"); isFailing(src) {
+		t.Fatal("retry kept the failing source")
+	}
+	if n := slices.Index(fh.got(), hubCall{"replace", "h1"}); n < 0 {
+		t.Fatalf("hub calls %v", fh.got())
+	}
+}
+
+// The first frame never waits on the Keychain: agent hosts start Connecting
+// on a placeholder and get their source from the edit queue.
+func TestStartHubDoesNotWaitForKeychain(t *testing.T) {
+	_, _ = stubSSH(t)
+	c := store.Default()
+	c.Hosts = append(c.Hosts, sshHost("h1"))
+	sec := &flakySecrets{MemSecrets: store.NewMemSecrets(), gate: make(chan struct{})}
+	sec.MemSecrets.Set(store.TokenKey("h1"), testToken)
+	l := newLoop(t)
+	w := newCore(c, testPaths(t), sec, localFake, l.post, slog.New(slog.DiscardHandler))
+	app := newFakeApp()
+	l.do(func() { w.attach(app, "") })
+	started := make(chan struct{})
+	go func() { l.do(w.startHub); close(started) }()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startHub waited for the Keychain")
+	}
+	defer w.shutdown()
+	waitFor(t, l, "local snapshot while the Keychain is blocked", func() bool { return app.views["local"].Snap != nil })
+	var st hub.ConnState
+	l.do(func() { st = app.views["h1"].Conn.State })
+	if st != hub.Connecting {
+		t.Fatalf("h1 state %q while its token is being read", st)
+	}
+	close(sec.gate)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if src, ok := w.lookup("h1"); ok && !isFailing(src) && !isPending(src) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("agent source never built")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func isPending(s source.Source) bool { _, ok := s.(pending); return ok }
 
 // --- passphrase, logs, timings, shutdown ---------------------------------------
 
@@ -633,18 +815,18 @@ func TestPassphraseAskedOnTheMainLoop(t *testing.T) {
 	app := newFakeApp()
 	app.answer = func(k string) (string, bool) { return "pw-for-" + filepath.Base(k), true }
 	l.do(func() { w.attach(app, "") })
-	got, err := w.passphrase("/k/id_x")
+	got, err := w.passphrase(context.Background(), "/k/id_x")
 	if err != nil || got != "pw-for-id_x" {
 		t.Fatalf("passphrase = %q %v", got, err)
 	}
 	app.answer = func(string) (string, bool) { return "", false }
-	if _, err := w.passphrase("/k/id_y"); err == nil {
+	if _, err := w.passphrase(context.Background(), "/k/id_y"); err == nil {
 		t.Fatal("cancelled prompt returned no error")
 	}
 	// An unanswered prompt ends when the app quits.
 	app.answer = nil
 	res := make(chan error, 1)
-	go func() { _, err := w.passphrase("/k/id_z"); res <- err }()
+	go func() { _, err := w.passphrase(context.Background(), "/k/id_z"); res <- err }()
 	waitFor(t, l, "third prompt", func() bool { return len(app.prompts) == 3 })
 	w.shutdown()
 	select {
@@ -731,5 +913,45 @@ func TestShutdownOrder(t *testing.T) {
 	}
 	if got, _, _ := store.Load(e.p.Config); !slices.Equal(got.Settings.Columns["processes"], []string{"pid"}) {
 		t.Fatalf("pending columns lost on quit: %v", got.Settings.Columns)
+	}
+}
+
+// A dial that gives up (host removed or replaced) withdraws its prompt.
+func TestPassphraseEndsWithDialCtx(t *testing.T) {
+	l := newLoop(t)
+	w := newCore(store.Default(), testPaths(t), store.NewMemSecrets(), localFake, l.post, slog.New(slog.DiscardHandler))
+	app := newFakeApp()
+	l.do(func() { w.attach(app, "") })
+	defer w.shutdown()
+	ctx, cancel := context.WithCancel(context.Background())
+	res := make(chan error, 1)
+	go func() { _, err := w.passphrase(ctx, "/k/id_q"); res <- err }()
+	waitFor(t, l, "prompt", func() bool { return len(app.prompts) == 1 })
+	cancel()
+	select {
+	case err := <-res:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt outlived its dial")
+	}
+	waitFor(t, l, "prompt withdrawn", func() bool { return slices.Equal(app.withdrawn, []string{"/k/id_q"}) })
+}
+
+func TestSetColumnsAfterShutdownIsIgnored(t *testing.T) {
+	e := newEffEnv(t, store.Default())
+	e.w.shutdown()
+	e.w.cfg.debounce = time.Millisecond
+	e.w.cfg.SetColumns("processes", []string{"late"})
+	e.w.cfg.mu.Lock()
+	armed, pend := e.w.cfg.timer != nil, e.w.cfg.pending
+	e.w.cfg.mu.Unlock()
+	if armed || pend {
+		t.Fatal("column change accepted after shutdown")
+	}
+	e.w.cfg.Flush()
+	if _, err := os.Stat(e.p.Config); !os.IsNotExist(err) {
+		t.Fatal("columns saved after shutdown")
 	}
 }
