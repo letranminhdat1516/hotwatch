@@ -74,12 +74,14 @@ type sshDialer struct {
 	handshakeTimeout time.Duration // tests shorten this
 	closeWait        time.Duration // how long Close waits for an in-flight connect; tests shorten this
 	dialSem          chan struct{} // serialises connects; waiters honour ctx
-	// decrypted and prompted are guarded by dialSem and live in memory only.
-	decrypted []ssh.Signer
-	prompted  map[string]bool
-	mu        sync.Mutex // guards the fields below
-	sess      *sshSession
-	closed    bool
+	decrypted        []ssh.Signer  // guarded by dialSem; memory only
+	// promptMu guards prompted only and is never held across I/O or a prompt,
+	// so ResetPrompts never waits for a connect.
+	promptMu sync.Mutex
+	prompted map[string]bool
+	mu       sync.Mutex // guards the fields below
+	sess     *sshSession
+	closed   bool
 }
 
 // NewSSH returns a Dialer that tunnels to 127.0.0.1:AgentPort on the host over
@@ -128,27 +130,43 @@ func (d *sshDialer) Close() error {
 	// semaphore for too long, it clears the cache itself on the way out.
 	select {
 	case d.dialSem <- struct{}{}:
-		d.decrypted, d.prompted = nil, nil
+		d.decrypted = nil
 		<-d.dialSem
 	case <-time.After(d.closeWait):
 	}
+	d.promptMu.Lock()
+	d.prompted = nil
+	d.promptMu.Unlock()
 	return nil
 }
 
 var _ PromptResetter = (*sshDialer)(nil)
 
-// ResetPrompts forgets which key files were already prompted for, under the
-// dial semaphore so it never races a connect; it waits for one in flight and
-// returns at once on a closed dialer.
+// ResetPrompts forgets which key files were already prompted for, so the next
+// connect may ask once more for a declined key. It never blocks: a prompt open
+// right now stays open, and if it is declined the next connect asks again.
+// Decrypted keys are kept; a closed dialer stays cleared.
 func (d *sshDialer) ResetPrompts() {
-	select {
-	case d.dialSem <- struct{}{}:
-		if d.prompted != nil {
-			d.prompted = map[string]bool{}
-		}
-		<-d.dialSem
-	case <-d.life.Done():
+	d.promptMu.Lock()
+	if d.prompted != nil {
+		d.prompted = map[string]bool{}
 	}
+	d.promptMu.Unlock()
+}
+
+// markPrompted records that path is being asked for (even if declined).
+func (d *sshDialer) markPrompted(path string) {
+	d.promptMu.Lock()
+	if d.prompted != nil {
+		d.prompted[path] = true
+	}
+	d.promptMu.Unlock()
+}
+
+func (d *sshDialer) wasPrompted(path string) bool {
+	d.promptMu.Lock()
+	defer d.promptMu.Unlock()
+	return d.prompted[path]
 }
 
 func (d *sshDialer) current() *sshSession {
@@ -202,7 +220,7 @@ func (d *sshDialer) session(ctx context.Context) (*sshSession, error) {
 	}
 	d.mu.Lock()
 	if d.closed {
-		d.decrypted, d.prompted = nil, nil // Close could not take the semaphore
+		d.decrypted = nil // Close could not take the semaphore
 	}
 	d.mu.Unlock()
 	if err != nil {
@@ -252,7 +270,7 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 	// Prompt outside any handshake deadline, then reconnect once.
 	added := false
 	for _, k := range encrypted {
-		d.prompted[k.path] = true // never ask twice, even if declined
+		d.markPrompted(k.path) // never ask twice, even if declined
 		pass, perr := cfg.Passphrase(ctx, k.path)
 		if ctx.Err() != nil {
 			break
@@ -407,7 +425,7 @@ func (d *sshDialer) loadFileKeys() (plain []ssh.Signer, encrypted []encryptedKey
 		var pm *ssh.PassphraseMissingError
 		switch {
 		case errors.As(err, &pm):
-			if !d.prompted[p] {
+			if !d.wasPrompted(p) {
 				encrypted = append(encrypted, encryptedKey{p, raw})
 			}
 		case err != nil:

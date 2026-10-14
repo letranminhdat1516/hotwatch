@@ -150,11 +150,14 @@ func buildSource(h store.Host, env sourceEnv) (source.Source, io.Closer, error) 
 			AppKnownHosts:   env.Paths.AppKnownHosts, Passphrase: env.Passphrase})
 	}
 	client := remote.New(d.DialAgent, token)
-	return client, &agentCloser{client: client, dialer: d}, nil
+	ac := &agentCloser{client: client, dialer: d}
+	if r, ok := d.(transport.PromptResetter); ok {
+		return client, &promptingCloser{ac, r}, nil
+	}
+	return client, ac, nil
 }
 
-// agentCloser retires an agent source: idle HTTP connections, then the
-// dialer. It passes ResetPrompts through to a dialer that has it.
+// agentCloser retires an agent source: idle HTTP connections, then the dialer.
 type agentCloser struct {
 	client interface{ CloseIdleConnections() }
 	dialer transport.Dialer
@@ -165,10 +168,11 @@ func (a *agentCloser) Close() error {
 	return a.dialer.Close()
 }
 
-func (a *agentCloser) ResetPrompts() {
-	if r, ok := a.dialer.(transport.PromptResetter); ok {
-		r.ResetPrompts()
-	}
+// promptingCloser is the closer of a source whose dialer prompts for
+// passphrases (SSH): Retry resets its declined prompts.
+type promptingCloser struct {
+	*agentCloser
+	transport.PromptResetter
 }
 
 func expandHome(p, home string) string {
@@ -590,15 +594,11 @@ func (c *core) retry(id string) {
 		c.rebuild(id)
 		return
 	}
-	r, ok := c.reg.closer(id).(transport.PromptResetter)
-	if !ok {
-		c.hub.Retry(id)
-		return
-	}
-	c.queue.do(func() {
+	// ResetPrompts never blocks (a prompt may be open), so neither does Retry.
+	if r, ok := c.reg.closer(id).(transport.PromptResetter); ok {
 		r.ResetPrompts()
-		c.hub.Retry(id)
-	})
+	}
+	c.hub.Retry(id)
 }
 
 func (c *core) host(id string) (store.Host, bool) {

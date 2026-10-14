@@ -1120,3 +1120,66 @@ func TestRetryReasksDeclinedPassphrase(t *testing.T) {
 		t.Fatalf("prompts after retry %d, want 2", n)
 	}
 }
+
+// Retry (and Trust, which uses it) while a passphrase prompt is open and
+// unanswered never blocks the edit queue: the prompt stays open and host
+// edits still go through.
+func TestRetryWithOpenPromptDoesNotBlockQueue(t *testing.T) {
+	st := startSSHStack(t, nil)
+	waitFor(t, st.l, "passphrase prompt", func() bool { return len(st.app.prompts) == 1 })
+	st.l.do(func() { st.app.retry("h1") })
+	flushWithin(t, st.w)
+	st.l.do(func() {
+		if len(st.app.withdrawn) != 0 {
+			t.Error("retry withdrew the open prompt")
+		}
+	})
+
+	h2 := store.Host{ID: "h2", Name: "h2", Kind: "agent", Conn: &store.Conn{Type: "direct", Address: "127.0.0.1", AgentPort: 1}}
+	st.l.do(func() {
+		eff := st.w.effects()
+		if err := eff.SetToken("h2", testToken); err != nil {
+			t.Error(err)
+		}
+		c := st.w.cfg.Config()
+		c.Hosts = append(c.Hosts, h2)
+		if err := eff.SaveConfig(c); err != nil {
+			t.Error(err)
+		}
+		eff.HostAdded(h2)
+	})
+	flushWithin(t, st.w)
+	if _, ok := st.w.lookup("h2"); !ok {
+		t.Fatal("host added after retry is not registered")
+	}
+	st.l.do(func() {
+		c := st.w.cfg.Config()
+		c.Hosts = slices.DeleteFunc(c.Hosts, func(h store.Host) bool { return h.ID == "h1" })
+		eff := st.w.effects()
+		if err := eff.SaveConfig(c); err != nil {
+			t.Error(err)
+		}
+		eff.HostRemoved("h1")
+	})
+	flushWithin(t, st.w)
+	waitFor(t, st.l, "prompt withdrawn", func() bool {
+		return slices.Equal(st.app.withdrawn, []string{st.srv.KeyPath})
+	})
+}
+
+// Retry on a direct host goes straight to the hub, even with the edit queue busy.
+func TestRetryDirectHostBypassesQueue(t *testing.T) {
+	c := store.Default()
+	c.Hosts = append(c.Hosts, store.Host{ID: "hd", Kind: "agent", Conn: &store.Conn{Type: "direct", Address: "127.0.0.1", AgentPort: 1}})
+	e := newEffEnv(t, c)
+	e.sec.Set(store.TokenKey("hd"), testToken)
+	e.w.buildAgents()
+	e.w.queue.flush()
+	release := make(chan struct{})
+	e.w.queue.do(func() { <-release })
+	defer close(release)
+	e.app.retry("hd")
+	if !e.has("retry", "hd") {
+		t.Fatalf("retry waited for the edit queue: calls %v", e.hub.got())
+	}
+}

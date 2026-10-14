@@ -18,7 +18,8 @@ type Dialer interface {
 // PromptResetter is implemented by dialers that remember declined passphrase
 // prompts. ResetPrompts lets the next connect ask again (an explicit retry by
 // the user); keys already decrypted are kept. Automatic reconnects never call
-// it, so a declined key is asked for at most once per user action.
+// it, so a declined key is asked for at most once per user action. It never
+// blocks, even while a prompt is open, so callers need no queue.
 type PromptResetter interface {
 	ResetPrompts()
 }

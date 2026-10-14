@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -942,6 +943,54 @@ func TestResetPromptsAsksAgainOnce(t *testing.T) {
 		t.Fatalf("after reset: err %v, prompts %d", err, calls)
 	}
 	c.Close()
+}
+
+// ResetPrompts never waits for a connect blocked in an open prompt; the prompt
+// stays open, and if it is then declined the next connect asks once more.
+func TestResetPromptsDuringOpenPrompt(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	var calls atomic.Int32
+	open, release := make(chan struct{}), make(chan struct{})
+	cfg.Passphrase = func(ctx context.Context, _ string) (string, error) {
+		if calls.Add(1) == 1 {
+			close(open)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		return "", errors.New("declined")
+	}
+	d := NewSSH(cfg)
+	defer d.Close()
+	res := make(chan error, 1)
+	go func() { _, err := d.DialAgent(context.Background()); res <- err }()
+	<-open
+	done := make(chan struct{})
+	go func() { d.(PromptResetter).ResetPrompts(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("ResetPrompts waited for an open prompt")
+	}
+	select {
+	case <-res:
+		t.Fatal("ResetPrompts ended the open prompt")
+	default:
+	}
+	close(release)
+	if err := <-res; err == nil {
+		t.Fatal("declined key authenticated")
+	}
+	if _, err := d.DialAgent(context.Background()); err == nil || calls.Load() != 2 {
+		t.Fatalf("connect after reset: err %v, prompts %d", err, calls.Load())
+	}
+	if _, err := d.DialAgent(context.Background()); err == nil || calls.Load() != 2 {
+		t.Fatalf("automatic redial: err %v, prompts %d", err, calls.Load())
+	}
 }
 
 // ResetPrompts keeps keys already decrypted: a later connect needs no prompt.
