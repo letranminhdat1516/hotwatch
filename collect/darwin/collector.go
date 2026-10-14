@@ -29,6 +29,10 @@ type collector struct {
 	apfsList   func(context.Context) ([]byte, error)
 	prevNet    map[string]netCounters
 	prevNetAt  time.Time
+
+	prevProc map[procKey]procPrev
+	ports    portCache
+	lsof     func(context.Context) ([]byte, error) // nil = runLsof
 }
 
 // New returns a Collector for the local Mac. Sample must not be called
@@ -76,9 +80,4 @@ func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
 	}
 	s.Partial = partial
 	return s, nil
-}
-
-// Processes is implemented by task B2.
-func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
-	return nil, nil
 }

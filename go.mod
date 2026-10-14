@@ -3,13 +3,13 @@ module hotwatch
 go 1.27.1
 
 require (
+	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.4.8
 	github.com/shirou/gopsutil/v4 v4.26.9
 	golang.org/x/sys v0.49.0
 )
 
 require (
-	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
