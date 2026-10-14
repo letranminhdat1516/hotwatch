@@ -553,7 +553,151 @@ func TestProcessesImage(t *testing.T) {
 	if err := png.Encode(f, tt.Image()); err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out) == "" {
-		t.Fatal("unreachable")
+}
+
+// refreshes are the ways a process list changes under an open dialog.
+var refreshes = map[string]func(ps []model.Process) []model.Process{
+	"reordered": func(ps []model.Process) []model.Process {
+		out := slices.Clone(ps)
+		slices.Reverse(out)
+		return out
+	},
+	"removed": func(ps []model.Process) []model.Process {
+		return slices.DeleteFunc(slices.Clone(ps), func(p model.Process) bool { return p.PID == 4242 })
+	},
+	"pid reused": func(ps []model.Process) []model.Process {
+		out := slices.Clone(ps)
+		for i := range out {
+			if out[i].PID == 4242 {
+				out[i].StartTime = out[i].StartTime.Add(time.Hour)
+			}
+		}
+		return out
+	},
+}
+
+func TestProcessesConfirmedTargetIsPinnedAcrossRefresh(t *testing.T) {
+	orig := fixtureProcs(50)
+	wantTarget := fmt.Sprintf("4242@%d", orig[0].StartTime.UnixNano())
+	for name, refresh := range refreshes {
+		for _, force := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/force=%v", name, force), func(t *testing.T) {
+				e := newEnv(slices.Clone(orig))
+				startKill(t, e)
+				verb, last := "TERM", "Terminate process"
+				if force {
+					e.click(t, "Force kill")
+					verb, last = "KILL", "Force kill process"
+				} else {
+					e.click(t, "Terminate")
+				}
+				e.view.Procs = refresh(orig)
+				e.gen++
+				e.tt.Frame()
+				if force {
+					e.click(t, "Continue")
+					e.view.Procs = refresh(orig)
+					e.gen++
+					e.tt.Frame()
+				}
+				e.click(t, last)
+				if len(e.run.Started) != 1 || e.run.Started[0].Target != wantTarget || e.run.Started[0].Verb != verb {
+					t.Fatalf("started %+v, want %s %s", e.run.Started, verb, wantTarget)
+				}
+			})
+		}
 	}
+}
+
+func TestProcessesInspectorFollowsProcessAcrossRefresh(t *testing.T) {
+	orig := fixtureProcs(20)
+	e := newEnv(slices.Clone(orig))
+	startKill(t, e)
+	stamp := orig[0].StartTime.Local().Format("2006-01-02 15:04:05")
+	e.view.Procs = append([]model.Process{proc(5, "newcomer", 99)}, orig...)
+	e.gen++
+	e.tt.Frame()
+	has(t, e.tt, "4242", "Terminate")
+	if !slices.ContainsFunc(e.tt.Texts(), func(x string) bool { return strings.HasPrefix(x, stamp) }) {
+		t.Fatalf("inspector lost the start time: %q", e.tt.Texts())
+	}
+	e.view.Procs = slices.Clone(orig[1:])
+	e.gen++
+	e.tt.Frame()
+	lacks(t, e.tt, "Terminate", "Force kill")
+}
+
+func TestProcessesUnknownStartTimeCannotBeSignalled(t *testing.T) {
+	ps := []model.Process{{PID: 9, PPID: 0, Name: "mystery"}}
+	e := newEnv(ps)
+	rowOf(e, t, "mystery")
+	has(t, e.tt, "Start time unknown — cannot signal safely", "Terminate", "Force kill")
+	e.click(t, "Terminate")
+	e.click(t, "Force kill")
+	lacks(t, e.tt, "Terminate mystery (PID 9)?", "Force kill mystery (PID 9)?")
+	if len(e.run.Started) != 0 {
+		t.Fatalf("started %+v", e.run.Started)
+	}
+}
+
+func TestProcessesFilteringOutTheSelectionClosesInspector(t *testing.T) {
+	e := newEnv(fixtureProcs(20))
+	startKill(t, e)
+	has(t, e.tt, "Terminate")
+	e.click(t, "Search")
+	e.tt.Key(ui.Cmd, ui.KeyA)
+	e.tt.Type("chrome")
+	lacks(t, e.tt, "Terminate", "Force kill")
+	e.tt.Key(ui.Cmd, ui.KeyA)
+	e.tt.Type("sleep")
+	lacks(t, e.tt, "Terminate") // the choice does not come back by itself
+}
+
+func treeProcs() []model.Process {
+	return []model.Process{
+		{PID: 1, PPID: 0, Name: "init", StartTime: started},
+		{PID: 10, PPID: 1, Name: "shell", StartTime: started.Add(time.Second)},
+		{PID: 11, PPID: 10, Name: "editor", StartTime: started.Add(2 * time.Second)},
+	}
+}
+
+func TestProcessesTreeOpensNewParentsButKeepsCollapsed(t *testing.T) {
+	e := newEnv(treeProcs())
+	e.click(t, "Tree view")
+	has(t, e.tt, "editor")
+	// A parent that shows up in a refresh is open.
+	e.view.Procs = append(treeProcs(),
+		model.Process{PID: 20, PPID: 1, Name: "daemon", StartTime: started.Add(3 * time.Second)},
+		model.Process{PID: 21, PPID: 20, Name: "worker", StartTime: started.Add(4 * time.Second)})
+	e.gen++
+	e.tt.Frame()
+	has(t, e.tt, "worker")
+	// The user's collapse of "shell" survives a refresh.
+	collapse(e, "shell")
+	lacks(t, e.tt, "editor")
+	e.gen++
+	e.tt.Frame()
+	lacks(t, e.tt, "editor")
+	// A filter that hides a parent and its clearing do not lose openness.
+	e.search(t, "worker")
+	e.tt.Key(ui.Cmd, ui.KeyA)
+	e.tt.Type("")
+	has(t, e.tt, "worker")
+}
+
+// collapse clicks the disclosure arrow left of the row showing name.
+func collapse(e *env, name string) {
+	r, _ := e.tt.Find(name)
+	e.tt.ClickAt(r.X-10, r.Y+r.H/2)
+}
+
+func TestProcessesTreeCollapseNeverLeavesHiddenRowInInspector(t *testing.T) {
+	e := newEnv(treeProcs())
+	e.click(t, "Tree view")
+	rowOf(e, t, "editor")
+	has(t, e.tt, "Terminate")
+	collapse(e, "shell") // the tree moves the choice to the closed item
+	lacks(t, e.tt, "editor")
+	has(t, e.tt, "Terminate", "10")
+	lacks(t, e.tt, "11")
 }

@@ -25,14 +25,14 @@ type procCol struct {
 }
 
 var procCols = []procCol{
-	{id: "name", title: "Name", min: 120},
-	{id: "pid", title: "PID", width: 80, min: 50, align: ui.End},
-	{id: "user", title: "User", width: 110, min: 60},
-	{id: "cpu", title: "CPU", width: 80, min: 50, align: ui.End},
-	{id: "mem", title: "Memory", width: 100, min: 60, align: ui.End},
-	{id: "threads", title: "Threads", width: 80, min: 50, align: ui.End},
-	{id: "ports", title: "Ports", width: 140, min: 60},
-	{id: "started", title: "Started", width: 130, min: 80},
+	{id: "name", title: "Name", min: 100},
+	{id: "pid", title: "PID", width: 64, min: 44, align: ui.End},
+	{id: "user", title: "User", width: 90, min: 50},
+	{id: "cpu", title: "CPU", width: 72, min: 50, align: ui.End},
+	{id: "mem", title: "Memory", width: 84, min: 60, align: ui.End},
+	{id: "threads", title: "Threads", width: 80, min: 72, align: ui.End},
+	{id: "ports", title: "Ports", width: 110, min: 60},
+	{id: "started", title: "Started", width: 104, min: 80},
 }
 
 func colByID(id string) (procCol, bool) {
@@ -90,9 +90,9 @@ type Processes struct {
 	layout ui.TableLayout
 	sort   ui.SortOrder
 
-	query    string
-	treeMode bool
-	opened   bool // the tree's items were opened for this tree mode
+	query     string
+	treeMode  bool
+	collapsed map[procKey]bool // tree items the user closed; the rest are open
 
 	list    ui.ListState
 	tree    ui.OutlineState[procKey]
@@ -118,7 +118,7 @@ type pendingKill struct {
 
 // NewProcesses returns the page with every column, sorted by CPU, largest first.
 func NewProcesses() *Processes {
-	return &Processes{cols: allColumns(), sort: ui.SortOrder{Column: "cpu", Descending: true}, inspW: 340, row: -1}
+	return &Processes{cols: allColumns(), sort: ui.SortOrder{Column: "cpu", Descending: true}, inspW: 320, row: -1}
 }
 
 // SetColumns restores the saved visible columns and their order. Unknown and
@@ -408,7 +408,7 @@ func (p *Processes) content(c *ui.Context, in ProcessesInput) {
 	h := max(wh-300, 240)
 	sel := -1 // index of the chosen process in ps
 	if p.hasSel {
-		if i, ok := p.cache.index[p.sel]; ok && i < len(ps) {
+		if i, ok := p.cache.index[p.sel]; ok && i < len(ps) && p.visible(i) {
 			sel = i
 		} else {
 			p.hasSel = false
@@ -433,6 +433,14 @@ func (p *Processes) content(c *ui.Context, in ProcessesInput) {
 	}).Height(h)
 }
 
+// visible reports whether process i passes the search.
+func (p *Processes) visible(i int) bool {
+	if p.treeMode {
+		return true // the tree's own rows decide; see table
+	}
+	return slices.Contains(p.cache.rows, i)
+}
+
 // table draws the process table or tree, and takes what the user did to it:
 // a choice, a sort, a moved or hidden column.
 func (p *Processes) table(c *ui.Context, in ProcessesInput) ui.Element {
@@ -451,11 +459,10 @@ func (p *Processes) table(c *ui.Context, in ProcessesInput) ui.Element {
 	var chosen func(row int) (procKey, bool)
 	if p.treeMode {
 		st := &p.tree
-		if !p.opened {
-			for k := range p.cache.kids {
+		for k := range p.cache.kids {
+			if !p.collapsed[k] {
 				st.Open.Add(k)
 			}
-			p.opened = true
 		}
 		if p.hasSel {
 			for r := 0; r < st.Rows(); r++ {
@@ -475,7 +482,6 @@ func (p *Processes) table(c *ui.Context, in ProcessesInput) ui.Element {
 			})
 		chosen = func(row int) (procKey, bool) { return st.Item(row), row < st.Rows() }
 	} else {
-		p.opened = false
 		st := &p.list
 		rows := p.cache.rows
 		if p.hasSel {
@@ -489,6 +495,25 @@ func (p *Processes) table(c *ui.Context, in ProcessesInput) ui.Element {
 		chosen = func(row int) (procKey, bool) { return p.cache.keys[rows[row]], row < len(rows) }
 	}
 	el.Changed() // applies this frame's click, key or header drag now
+	if p.treeMode {
+		if p.collapsed == nil {
+			p.collapsed = map[procKey]bool{}
+		}
+		for k := range p.cache.kids {
+			if p.tree.Open.Has(k) {
+				delete(p.collapsed, k)
+			} else {
+				p.collapsed[k] = true
+			}
+		}
+		if p.hasSel && p.row < 0 && p.tree.Rows() > 0 { // collapsed away or filtered out
+			p.hasSel = false
+			c.Invalidate()
+		}
+	} else if p.hasSel && p.row < 0 { // filtered out
+		p.hasSel = false
+		c.Invalidate()
+	}
 	if p.row >= 0 {
 		if k, ok := chosen(p.row); ok {
 			p.sel, p.hasSel = k, true

@@ -43,7 +43,9 @@ func (p *Processes) inspector(c *ui.Context, in ProcessesInput, pr *model.Proces
 		ports = portsText(pr.Ports)
 	}
 	target := fmt.Sprintf("%d@%d", pr.PID, startNano(pr.StartTime))
-	running := in.Actions.Running(in.HostID, target)
+	// Without a start time the target "pid@0" would not identify the process.
+	unsafe := pr.StartTime.IsZero()
+	running := in.Actions.Running(in.HostID, target) || unsafe
 
 	ui.Column(c).Padding(2 * components.Grid).Gap(2 * components.Grid).Children(func() {
 		ui.Text(c, "Command").FontSize(12).FontWeight(600).TextColor(t.TextMuted)
@@ -64,6 +66,9 @@ func (p *Processes) inspector(c *ui.Context, in ProcessesInput, pr *model.Proces
 		field("Ports", ports)
 		if pr.AppBundle != "" {
 			field("App", pr.AppBundle)
+		}
+		if unsafe {
+			ui.Text(c, "Start time unknown — cannot signal safely").FontSize(12).TextColor(t.TextMuted)
 		}
 		ui.Row(c).Gap(components.Grid).Children(func() {
 			ask := func(dialog *bool) {
