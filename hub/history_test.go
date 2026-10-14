@@ -33,7 +33,7 @@ func TestHistorySeriesValues(t *testing.T) {
 	h.Push(now, model.Snapshot{
 		CPU:    model.CPU{Total: 12},
 		Memory: model.Memory{Total: 200, Used: 50},
-		Net:    []model.Interface{{RxBps: fp(10), TxBps: fp(1)}, {RxBps: fp(5)}, {}},
+		Net:    []model.Interface{{Name: "en0", Up: true, RxBps: fp(10), TxBps: fp(1)}, {Name: "en1", Up: true, RxBps: fp(5)}, {Name: "en2", Up: true}},
 		Disks:  []model.Volume{{ReadBps: fp(7), WriteBps: fp(3)}, {ReadBps: fp(1)}},
 		GPUs:   []model.GPU{{UtilPct: fp(40)}, {UtilPct: fp(90)}},
 	})
@@ -48,7 +48,7 @@ func TestHistorySeriesValues(t *testing.T) {
 
 func TestHistorySkipsUnknown(t *testing.T) {
 	h := NewHistory()
-	h.Push(time.Unix(1, 0), model.Snapshot{Net: []model.Interface{{}}, Disks: []model.Volume{{}}, GPUs: []model.GPU{{}}})
+	h.Push(time.Unix(1, 0), model.Snapshot{Net: []model.Interface{{Name: "en0", Up: true}}, Disks: []model.Volume{{}}, GPUs: []model.GPU{{}}})
 	for _, n := range []string{"mem", "net.rx", "net.tx", "disk.read", "disk.write", "gpu"} {
 		if p := h.Series(n); len(p) != 0 {
 			t.Errorf("%s stored %v for unknown values", n, p)
@@ -69,5 +69,20 @@ func TestHistorySeriesIsCopy(t *testing.T) {
 	a[0].V = 99
 	if h.Series("cpu")[0].V != 1 {
 		t.Fatal("Series returned internal storage")
+	}
+}
+
+func TestHistoryNetSkipsLoopbackAndDownInterfaces(t *testing.T) {
+	h := NewHistory()
+	h.Push(time.Unix(1, 0), model.Snapshot{Net: []model.Interface{
+		{Name: "lo", Up: true, RxBps: fp(1000), TxBps: fp(1000)},
+		{Name: "lo0", Up: true, RxBps: fp(1000), TxBps: fp(1000)},
+		{Name: "utun3", Up: false, RxBps: fp(500), TxBps: fp(500)},
+		{Name: "en0", Up: true, RxBps: fp(10), TxBps: fp(2)},
+	}})
+	for name, v := range map[string]float64{"net.rx": 10, "net.tx": 2} {
+		if p := h.Series(name); len(p) != 1 || p[0].V != v {
+			t.Errorf("%s = %+v, want %v", name, p, v)
+		}
 	}
 }

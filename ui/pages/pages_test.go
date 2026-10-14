@@ -123,14 +123,15 @@ func TestCPUPartialIsUnknownNotZero(t *testing.T) {
 
 func TestPagesWaitForData(t *testing.T) {
 	for name, p := range map[string]page{"cpu": pages.CPU, "mem": pages.Memory, "disk": pages.Disk, "net": pages.Network} {
-		has(t, render(p, view(nil, nil, "linux")), "Waiting for data…")
-		_ = name
+		t.Run(name, func(t *testing.T) {
+			has(t, render(p, view(nil, nil, "linux")), "Waiting for data…")
+		})
 	}
 }
 
 func TestMemoryDarwinSegments(t *testing.T) {
 	tt := render(pages.Memory, view(snap(), procs(), "darwin"))
-	has(t, tt, "App", "Wired", "Compressed", "Free", "Swap 1.0 GB / 4.0 GB", "Warning", "Memory")
+	has(t, tt, "App", "Wired", "Compressed", "Free", "Swap 1.0 GB / 4.0 GB", "Warning", "Memory usage")
 	lacks(t, tt, "Cached", "Buffers")
 }
 
@@ -156,6 +157,28 @@ func TestMemoryPressureBadgeColour(t *testing.T) {
 	}
 }
 
+func TestMemorySwapOff(t *testing.T) {
+	s := snap()
+	s.Memory.SwapTotal, s.Memory.SwapUsed = 0, 0
+	has(t, render(pages.Memory, view(s, nil, "darwin")), "Swap off")
+}
+
+func TestMemoryByAppGroupsBundles(t *testing.T) {
+	ps := []model.Process{
+		{PID: 1, Name: "Safari", RSS: 300 << 20, AppBundle: "/Applications/Safari.app"},
+		{PID: 2, Name: "Safari Web Content", RSS: 500 << 20, AppBundle: "/Applications/Safari.app"},
+		{PID: 3, Name: "zsh", RSS: 10 << 20},
+		{PID: 4, Name: "zsh", RSS: 5 << 20},
+		{PID: 5, Name: "Ghost", RSS: 0, AppBundle: "/Applications/Ghost.app"},
+	}
+	tt := render(pages.Memory, view(snap(), ps, "darwin"))
+	has(t, tt, "Memory by app", "Safari", "800.0 MB", "2", "zsh", "15.0 MB")
+	lacks(t, tt, "Ghost", "Safari.app", "/Applications/Safari.app")
+	linux := render(pages.Memory, view(snap(), ps, "linux"))
+	lacks(t, linux, "Memory by app")
+	lacks(t, render(pages.Memory, view(snap(), nil, "darwin")), "Memory by app")
+}
+
 func TestMemoryTopExcludesUnreadableRSS(t *testing.T) {
 	tt := render(pages.Memory, view(snap(), procs(), "darwin"))
 	has(t, tt, "Top processes by memory", "postgres", "2.0 GB", "python3")
@@ -172,8 +195,8 @@ func TestDiskNilRatesAreDashes(t *testing.T) {
 			n++
 		}
 	}
-	if n < 4 { // "/" write, "/data" read and write, postgres read
-		t.Errorf("only %d dashes in %q", n, tt.Texts())
+	if n != 5 { // "/" write, "/data" read and write, chart legend Write, postgres read
+		t.Errorf("%d dashes, want 5, in %q", n, tt.Texts())
 	}
 	has(t, tt, "Top processes by disk I/O", "python3", "postgres")
 	lacks(t, tt, "unreadable", "mDNSResponder")
@@ -184,6 +207,7 @@ func TestDiskPartialIsUnknown(t *testing.T) {
 	s.Partial = []string{"disks"}
 	tt := render(pages.Disk, view(s, nil, "linux"))
 	lacks(t, tt, "apfs", "/data")
+	has(t, tt, "—")
 }
 
 func TestNetworkInterfacesSkipLoopback(t *testing.T) {

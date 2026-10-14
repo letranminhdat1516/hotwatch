@@ -1,6 +1,10 @@
 package pages
 
 import (
+	"fmt"
+	"path"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -65,13 +69,29 @@ func Memory(c *ui.Context, v hub.HostView, now time.Time) {
 				}
 			})
 			components.StackedBar(c, segments(m, v.Info.OS))
-			swap := format.Unknown
+			swap := "off"
 			if m.SwapTotal > 0 {
 				swap = format.Bytes(m.SwapUsed) + " / " + format.Bytes(m.SwapTotal)
 			}
 			note(c, "Swap "+swap)
 		})
-		components.TimeChart(c, "Memory", "%", map[string][]hub.Point{"Used": points(v, "mem")}, now)
+		components.TimeChart(c, "Memory usage", "%", map[string][]hub.Point{"Used": points(v, "mem")}, now)
+		if v.Info.OS == "darwin" {
+			procSection(c, v, "Memory by app", func() {
+				apps := byApp(v.Procs)
+				table(c, []column{{title: "App"}, {title: "Processes", width: 9 * g(), end: true}, {title: "Memory", width: 10 * g(), end: true}},
+					len(apps), func(r, col int) {
+						switch col {
+						case 0:
+							text(c, apps[r].name, false)
+						case 1:
+							text(c, fmt.Sprint(apps[r].procs), true)
+						case 2:
+							text(c, format.Bytes(apps[r].rss), true)
+						}
+					})
+			})
+		}
 		procSection(c, v, "Top processes by memory", func() {
 			// RSS 0 means unreadable (macOS), not an empty process.
 			top := topProcs(v.Procs, func(p model.Process) bool { return p.RSS > 0 }, func(p model.Process) float64 { return float64(p.RSS) })
@@ -88,4 +108,51 @@ func Memory(c *ui.Context, v hub.HostView, now time.Time) {
 				})
 		})
 	})
+}
+
+// app is the processes of one application bundle (or of one executable name
+// when it has no bundle) and their combined resident memory.
+type app struct {
+	name  string
+	procs int
+	rss   uint64
+}
+
+// byApp groups processes by AppBundle, falling back to Name, and returns the
+// topN groups by memory. Processes with RSS 0 (unreadable) are skipped. A
+// bundle is shown by its file name without ".app".
+func byApp(ps []model.Process) []app {
+	idx := map[string]int{}
+	var apps []app
+	for _, p := range ps {
+		if p.RSS == 0 {
+			continue
+		}
+		key, name := p.Name, p.Name
+		if p.AppBundle != "" {
+			key = p.AppBundle
+			name = strings.TrimSuffix(path.Base(strings.TrimRight(p.AppBundle, "/")), ".app")
+		}
+		i, ok := idx[key]
+		if !ok {
+			i = len(apps)
+			idx[key] = i
+			apps = append(apps, app{name: name})
+		}
+		apps[i].procs++
+		apps[i].rss += p.RSS
+	}
+	slices.SortStableFunc(apps, func(a, b app) int {
+		switch {
+		case a.rss > b.rss:
+			return -1
+		case a.rss < b.rss:
+			return 1
+		}
+		return 0
+	})
+	if len(apps) > topN {
+		apps = apps[:topN]
+	}
+	return apps
 }

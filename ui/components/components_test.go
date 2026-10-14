@@ -3,6 +3,7 @@ package components_test
 import (
 	"math"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,6 +167,23 @@ func TestStackedBarLegend(t *testing.T) {
 	for _, want := range []string{"App", "8.0 GB", "Free", "4.0 GB"} {
 		if !slices.Contains(tt.Texts(), want) {
 			t.Errorf("missing %q in %q", want, tt.Texts())
+		}
+	}
+}
+
+func TestTimeChartByteTicksAreRound(t *testing.T) {
+	series := map[string][]hub.Point{"In": pts(100, 1<<20)}
+	tt := ui.NewTester(func(c *ui.Context) {
+		components.TimeChart(c, "Network", "B/s", series, now)
+	}, 600, 400)
+	for _, want := range []string{"0 B/s", "256.0 KB/s", "512.0 KB/s", "768.0 KB/s", "1.0 MB/s"} {
+		if !slices.Contains(tt.Texts(), want) {
+			t.Errorf("missing tick %q in %q", want, tt.Texts())
+		}
+	}
+	for _, x := range tt.Texts() {
+		if strings.Contains(x, "819") || strings.Contains(x, "204") {
+			t.Errorf("odd tick %q", x)
 		}
 	}
 }

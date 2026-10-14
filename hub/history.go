@@ -70,8 +70,8 @@ func sum[T any](items []T, f func(T) *float64) (total float64, ok bool) {
 }
 
 // Push records s at t. Unknown (nil) values are skipped, never stored as 0.
-// "mem" is used memory in percent of total; net and disk series are sums over
-// interfaces / volumes; "gpu" is the first GPU's utilisation.
+// "mem" is used memory in percent of total; net series are sums over the up,
+// non-loopback interfaces, disk series over volumes; "gpu" is the first GPU's utilisation.
 func (h *History) Push(t time.Time, s model.Snapshot) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -79,10 +79,16 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 	if s.Memory.Total > 0 {
 		h.add("mem", t, float64(s.Memory.Used)/float64(s.Memory.Total)*100)
 	}
-	if v, ok := sum(s.Net, func(i model.Interface) *float64 { return i.RxBps }); ok {
+	ifs := make([]model.Interface, 0, len(s.Net))
+	for _, i := range s.Net {
+		if i.Up && i.Name != "lo" && i.Name != "lo0" {
+			ifs = append(ifs, i)
+		}
+	}
+	if v, ok := sum(ifs, func(i model.Interface) *float64 { return i.RxBps }); ok {
 		h.add("net.rx", t, v)
 	}
-	if v, ok := sum(s.Net, func(i model.Interface) *float64 { return i.TxBps }); ok {
+	if v, ok := sum(ifs, func(i model.Interface) *float64 { return i.TxBps }); ok {
 		h.add("net.tx", t, v)
 	}
 	if v, ok := sum(s.Disks, func(d model.Volume) *float64 { return d.ReadBps }); ok {

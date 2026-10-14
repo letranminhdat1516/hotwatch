@@ -96,17 +96,8 @@ func TimeChart(c *ui.Context, title, unit string, series map[string][]hub.Point,
 			hi = 1
 		}
 	}
-	// Byte scales are made round in the unit they print in (KB, MB, …).
-	div := 1.0
-	if unit == "B/s" || unit == "B" {
-		for hi/div >= 1024 {
-			div *= 1024
-		}
-	}
-	y := chart.NewLinear(0, hi/div).Nice(4)
-	y.Format = func(v float64) string { return tickLabel(unit, v*div) }
-	yTicks := y.Ticks(4)
-	at := func(v float64) float32 { return y.At(v / div) }
+	y, yTicks := yScale(unit, hi)
+	at := func(v float64) float32 { return y.At(v) }
 	var xTicks []chart.Tick
 	for m := 5; m >= 0; m-- {
 		label := fmt.Sprintf("−%dm", m)
@@ -173,4 +164,27 @@ func plotPoints(pts []hub.Point, from time.Time, at func(float64) float32) (xs, 
 		ys = append(ys, v)
 	}
 	return xs, ys
+}
+
+// yScale is the y axis for values up to hi. Byte scales step in powers of two
+// (256 KB/s, 512 KB/s, 768 KB/s, 1 MB/s); others use round decimal steps.
+func yScale(unit string, hi float64) (chart.Linear, []chart.Tick) {
+	if (unit == "B/s" || unit == "B") && hi >= 1024 {
+		step := 1024.0
+		for step < hi/4 {
+			step *= 2
+		}
+		n := int(math.Ceil(hi / step))
+		top := float64(n) * step
+		y := chart.NewLinear(0, top)
+		ticks := make([]chart.Tick, n+1)
+		for i := range ticks {
+			v := float64(i) * step
+			ticks[i] = chart.Tick{At: y.At(v), Label: tickLabel(unit, v)}
+		}
+		return y, ticks
+	}
+	y := chart.NewLinear(0, hi).Nice(4)
+	y.Format = func(v float64) string { return tickLabel(unit, v) }
+	return y, y.Ticks(4)
 }
