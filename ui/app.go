@@ -42,8 +42,11 @@ func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.
 // Apply stores a copy of v for host id. Call it on the main thread.
 func (a *App) Apply(id string, v hub.HostView) { a.views[id] = copyView(v) }
 
-// copyView detaches the snapshot and slices from the poller's data. Hist is
-// internally synchronised and shared.
+// copyView detaches the snapshot and slices from the poller's data.
+// Convention: published views are never mutated in place, so pointer fields
+// (rates, GPU values) and inner slices (Addrs, Assertions) are shared
+// read-only; only the containers Apply stores are cloned.
+// Hist is internally synchronised and shared.
 func copyView(v hub.HostView) hub.HostView {
 	if v.Snap != nil {
 		s := *v.Snap

@@ -1,6 +1,7 @@
 package ui_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -30,13 +31,13 @@ func TestOverviewShowsCardsAndHidesAbsentHardware(t *testing.T) {
 	if tt.HasText("Battery") {
 		t.Fatal("battery card shown without a battery")
 	}
-	if tt.HasText("GPU") {
+	if tt.HasText("Apple M3") {
 		t.Fatal("gpu card shown without a gpu")
 	}
 }
 
 func TestOverviewUnknownRatesAreDashes(t *testing.T) {
-	snap := &model.Snapshot{Net: []model.Interface{{Name: "en0"}}}
+	snap := &model.Snapshot{Net: []model.Interface{{Name: "en0", Up: true}}}
 	app := testApp(hub.HostView{Snap: snap})
 	tt := ui.NewTester(app.View, 1200, 800)
 	if !tt.HasText("In —") || !tt.HasText("Out —") {
@@ -47,12 +48,64 @@ func TestOverviewUnknownRatesAreDashes(t *testing.T) {
 	}
 }
 
+func fullSnap() *model.Snapshot {
+	return &model.Snapshot{
+		CPU:     model.CPU{Total: 37.5, Load: [3]float64{1, 2, 3}},
+		Memory:  model.Memory{Total: 8 << 30, Used: 4 << 30},
+		Disks:   []model.Volume{{Mount: "/", Total: 100 << 30, Used: 25 << 30}},
+		Net:     []model.Interface{{Name: "en0", Up: true, RxBps: f64(2048), TxBps: f64(1024)}},
+		Battery: &model.Battery{ChargePct: 80},
+	}
+}
+
 func TestOverviewPartialSectionIsUnknown(t *testing.T) {
-	snap := &model.Snapshot{CPU: model.CPU{Total: 0}, Partial: []string{"cpu"}}
-	app := testApp(hub.HostView{Snap: snap})
-	tt := ui.NewTester(app.View, 1200, 800)
-	if tt.HasText("0.0 %") {
-		t.Fatalf("partial cpu shown as 0: %q", tt.Texts())
+	cases := []struct {
+		section string
+		want    []string // still shown
+		absent  []string
+		unknown []string
+	}{
+		{"cpu", []string{"50.0 %", "25.0 %", "In 2.0 KB/s", "80.0 %"}, []string{"37.5 %", "Load 1.00 / 2.00 / 3.00"}, []string{"—", "Load —"}},
+		{"net", []string{"37.5 %", "50.0 %", "80.0 %"}, []string{"In 2.0 KB/s"}, []string{"In —", "Out —"}},
+		{"battery", []string{"37.5 %", "50.0 %", "In 2.0 KB/s"}, []string{"80.0 %"}, []string{"—"}},
+	}
+	for _, tc := range cases {
+		snap := fullSnap()
+		snap.Partial = []string{tc.section}
+		app := testApp(hub.HostView{Snap: snap})
+		tt := ui.NewTester(app.View, 1200, 800)
+		for _, w := range append(tc.want, tc.unknown...) {
+			if !slices.Contains(tt.Texts(), w) {
+				t.Errorf("%s partial: missing %q in %q", tc.section, w, tt.Texts())
+			}
+		}
+		for _, w := range tc.absent {
+			if slices.Contains(tt.Texts(), w) {
+				t.Errorf("%s partial: unexpected %q in %q", tc.section, w, tt.Texts())
+			}
+		}
+	}
+}
+
+func TestOverviewNetworkSkipsLoopbackAndDownInterfaces(t *testing.T) {
+	snap := &model.Snapshot{Net: []model.Interface{
+		{Name: "lo", Up: true, RxBps: f64(5000)},
+		{Name: "en1", Up: false, RxBps: f64(7000)},
+		{Name: "en0", Up: true, RxBps: f64(1024), TxBps: f64(0)},
+	}}
+	tt := ui.NewTester(testApp(hub.HostView{Snap: snap}).View, 1200, 800)
+	if !tt.HasText("In 1.0 KB/s") || !tt.HasText("Out 0 B/s") {
+		t.Fatalf("texts %q", tt.Texts())
+	}
+}
+
+func TestOverviewOneCardPerGPU(t *testing.T) {
+	snap := &model.Snapshot{GPUs: []model.GPU{{Name: "GPU A", UtilPct: f64(10)}, {Name: "GPU B", UtilPct: f64(20)}}}
+	tt := ui.NewTester(testApp(hub.HostView{Snap: snap}).View, 1200, 800)
+	for _, w := range []string{"GPU A", "10.0 %", "GPU B", "20.0 %"} {
+		if !tt.HasText(w) {
+			t.Fatalf("missing %q in %q", w, tt.Texts())
+		}
 	}
 }
 
@@ -75,7 +128,7 @@ func TestOverviewShowsGPUAndBatteryWhenPresent(t *testing.T) {
 	}
 	app := testApp(hub.HostView{Snap: snap})
 	tt := ui.NewTester(app.View, 1200, 800)
-	for _, want := range []string{"GPU", "12.5 %", "Battery", "80.0 %", "Uptime 3h 2m"} {
+	for _, want := range []string{"Apple M3", "12.5 %", "Battery", "80.0 %", "Uptime 3h 2m"} {
 		if !tt.HasText(want) {
 			t.Fatalf("missing %q in %q", want, tt.Texts())
 		}

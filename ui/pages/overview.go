@@ -3,7 +3,7 @@
 package pages
 
 import (
-	"fmt"
+	"math"
 	"slices"
 	"time"
 
@@ -76,7 +76,7 @@ func cards(s *model.Snapshot) []card {
 	load := format.Unknown
 	if !partial(s, "cpu") {
 		cpu.value = format.Percent(ptr(s.CPU.Total))
-		load = fmt.Sprintf("%.2f / %.2f / %.2f", s.CPU.Load[0], s.CPU.Load[1], s.CPU.Load[2])
+		load = format.Load(s.CPU.Load)
 	}
 	cpu.details = []string{"Load " + load}
 	out = append(out, cpu)
@@ -113,6 +113,9 @@ func cards(s *model.Snapshot) []card {
 	if !partial(s, "net") {
 		var rxs, txs []*float64
 		for _, i := range s.Net {
+			if i.Name == "lo" || !i.Up {
+				continue
+			}
 			rxs, txs = append(rxs, i.RxBps), append(txs, i.TxBps)
 		}
 		rx, tx = format.Rate(sumRate(rxs)), format.Rate(sumRate(txs))
@@ -120,9 +123,8 @@ func cards(s *model.Snapshot) []card {
 	net.details = []string{"In " + rx, "Out " + tx}
 	out = append(out, net)
 
-	if len(s.GPUs) > 0 {
-		g := s.GPUs[0]
-		gpu := card{title: "GPU", value: format.Unknown, series: "gpu", ceiling: 100, details: []string{g.Name}}
+	for _, g := range s.GPUs {
+		gpu := card{title: g.Name, value: format.Unknown, series: "gpu", ceiling: 100}
 		if !partial(s, "gpu") {
 			gpu.value = format.Percent(g.UtilPct)
 			if g.MemUsed != nil && g.MemTotal != nil {
@@ -179,7 +181,9 @@ func sparkline(c *ui.Context, pts []hub.Point, ceiling float64) {
 	top := ceiling
 	if top == 0 {
 		for _, p := range pts {
-			top = max(top, p.V)
+			if !math.IsNaN(p.V) && !math.IsInf(p.V, 0) {
+				top = max(top, p.V)
+			}
 		}
 	}
 	if top <= 0 {
@@ -189,6 +193,10 @@ func sparkline(c *ui.Context, pts []hub.Point, ceiling float64) {
 	ys := make([]float32, len(pts))
 	for i, p := range pts {
 		xs[i] = float32(i) / float32(len(pts)-1)
+		if math.IsNaN(p.V) || math.IsInf(p.V, 0) {
+			ys[i] = float32(math.NaN()) // breaks the line
+			continue
+		}
 		ys[i] = float32(min(max(p.V/top, 0), 1))
 	}
 	accent := c.Theme().Accent
