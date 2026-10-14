@@ -61,16 +61,17 @@ type sshDialer struct {
 
 	keepaliveEvery time.Duration // tests shorten this
 
-	dialMu sync.Mutex // serialises connects
-	mu     sync.Mutex // guards the fields below
-	sess   *sshSession
-	closed bool
+	handshakeTimeout time.Duration // tests shorten this
+	dialSem          chan struct{} // serialises connects; waiters honour ctx
+	mu               sync.Mutex    // guards the fields below
+	sess             *sshSession
+	closed           bool
 }
 
 // NewSSH returns a Dialer that tunnels to 127.0.0.1:AgentPort on the host over
 // one reused SSH connection. It opens only direct-tcpip channels.
 func NewSSH(cfg SSHConfig) Dialer {
-	return &sshDialer{cfg: cfg, keepaliveEvery: sshKeepaliveEvery}
+	return &sshDialer{cfg: cfg, keepaliveEvery: sshKeepaliveEvery, handshakeTimeout: sshConnectTimeout, dialSem: make(chan struct{}, 1)}
 }
 
 var errDialerClosed = errors.New("ssh dialer closed")
@@ -136,8 +137,12 @@ func (d *sshDialer) session(ctx context.Context) (*sshSession, error) {
 		return s, nil
 	}
 
-	d.dialMu.Lock()
-	defer d.dialMu.Unlock()
+	select {
+	case d.dialSem <- struct{}{}:
+		defer func() { <-d.dialSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	d.mu.Lock()
 	s, closed = d.sess, d.closed
 	d.mu.Unlock()
@@ -184,16 +189,33 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 		}
 		username = u.Username
 	}
-	methods, agentConn := d.authMethods()
+	// Load (and decrypt) key files before dialing so a passphrase prompt
+	// is not bounded by the handshake deadline.
+	fileSigners, err := d.fileSigners()
+	if err != nil {
+		return nil, err
+	}
+	agentConn := d.dialAgentSocket()
+	// One "publickey" method: x/crypto tries only the first method of a
+	// given name, so agent keys and file keys share one chain.
+	signers := func() ([]ssh.Signer, error) {
+		var all []ssh.Signer
+		if agentConn != nil {
+			if as, err := agent.NewClient(agentConn).Signers(); err == nil {
+				all = append(all, as...)
+			}
+		}
+		return append(all, fileSigners...), nil
+	}
 	ccfg := &ssh.ClientConfig{
 		User:              username,
-		Auth:              methods,
+		Auth:              []ssh.AuthMethod{ssh.PublicKeysCallback(signers)},
 		HostKeyCallback:   checker.callback(),
 		HostKeyAlgorithms: checker.algorithms(address),
-		Timeout:           sshConnectTimeout,
+		Timeout:           d.handshakeTimeout,
 	}
 
-	nd := net.Dialer{Timeout: sshConnectTimeout}
+	nd := net.Dialer{Timeout: d.handshakeTimeout}
 	nc, err := nd.DialContext(ctx, "tcp", address)
 	if err != nil {
 		if agentConn != nil {
@@ -202,7 +224,7 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 		return nil, err
 	}
 	// Bound the handshake by the timeout and by ctx.
-	nc.SetDeadline(time.Now().Add(sshConnectTimeout))
+	nc.SetDeadline(time.Now().Add(d.handshakeTimeout))
 	stopWatch := context.AfterFunc(ctx, func() { nc.Close() })
 	sc, chans, reqs, err := ssh.NewClientConn(nc, address, ccfg)
 	stopWatch()
@@ -224,18 +246,17 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 	}, nil
 }
 
-// authMethods returns ssh-agent first (when reachable), then key files.
-func (d *sshDialer) authMethods() ([]ssh.AuthMethod, net.Conn) {
-	var methods []ssh.AuthMethod
-	var agentConn net.Conn
-	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
-		if c, err := net.DialTimeout("unix", sock, 2*time.Second); err == nil {
-			agentConn = c
-			methods = append(methods, ssh.PublicKeysCallback(agent.NewClient(c).Signers))
-		}
+// dialAgentSocket connects to ssh-agent when SSH_AUTH_SOCK is set and reachable.
+func (d *sshDialer) dialAgentSocket() net.Conn {
+	sock := os.Getenv("SSH_AUTH_SOCK")
+	if sock == "" {
+		return nil
 	}
-	methods = append(methods, ssh.PublicKeysCallback(d.fileSigners))
-	return methods, agentConn
+	c, err := net.DialTimeout("unix", sock, 2*time.Second)
+	if err != nil {
+		return nil
+	}
+	return c
 }
 
 // fileSigners loads the configured key, or the default ones that exist.

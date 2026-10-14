@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // Dialer opens connections to one host's agent HTTP port.
@@ -16,8 +18,9 @@ type Dialer interface {
 // HostKeyError reports an SSH host key that is unknown or has changed.
 type HostKeyError struct {
 	Host        string
-	Fingerprint string // "SHA256:…"
-	Mismatch    bool   // true = key changed (hard stop); false = unknown (ask user)
+	Fingerprint string        // "SHA256:…"
+	Mismatch    bool          // true = key changed (hard stop); false = unknown (ask user)
+	Key         ssh.PublicKey // the key the server presented; pass it to TrustHostKey after approval
 }
 
 func (e *HostKeyError) Error() string {

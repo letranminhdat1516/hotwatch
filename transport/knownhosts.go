@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -43,7 +44,7 @@ func newHostKeyChecker(files []string) (*hostKeyChecker, error) {
 			if len(line) == 0 || line[0] == '#' {
 				continue
 			}
-			if _, _, _, _, _, err := ssh.ParseKnownHosts(line); err != nil {
+			if _, _, _, _, _, err := ssh.ParseKnownHosts(line); err != nil || !validHostField(line) {
 				continue // malformed line: skipped, not fatal
 			}
 			clean = append(clean, line...)
@@ -123,25 +124,107 @@ func (c *hostKeyChecker) callback() ssh.HostKeyCallback {
 				Host:        knownhosts.Normalize(hostname),
 				Fingerprint: ssh.FingerprintSHA256(key),
 				Mismatch:    len(ke.Want) > 0,
+				Key:         key,
 			}
 		}
 		return err
 	}
 }
 
+// validHostField mirrors the host-pattern checks knownhosts.New applies, so a
+// line it would reject (and that would fail every host) is dropped instead.
+func validHostField(line []byte) bool {
+	fields := strings.Fields(string(line))
+	if len(fields) > 0 && strings.HasPrefix(fields[0], "@") {
+		fields = fields[1:]
+	}
+	if len(fields) == 0 {
+		return false
+	}
+	host := fields[0]
+	if host[0] == '|' {
+		parts := strings.Split(host, "|")
+		if len(parts) != 4 || parts[1] != "1" {
+			return false
+		}
+		_, e1 := base64.StdEncoding.DecodeString(parts[2])
+		_, e2 := base64.StdEncoding.DecodeString(parts[3])
+		return e1 == nil && e2 == nil
+	}
+	for _, p := range strings.Split(host, ",") {
+		if p == "" {
+			continue
+		}
+		p = strings.TrimPrefix(p, "!")
+		if p == "" {
+			return false
+		}
+		if p[0] == '[' {
+			if _, _, err := net.SplitHostPort(p); err != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+var (
+	// ErrFingerprintMismatch: the key is not the one the user approved.
+	ErrFingerprintMismatch = errors.New("host key does not match the approved fingerprint")
+	// ErrHostKeyConflict: a known_hosts file already holds a different key for the host.
+	ErrHostKeyConflict = errors.New("a different host key is already on file; remove it by hand")
+)
+
 // TrustHostKey records key for host:port in the app's own known_hosts file
 // (created 0600 in a 0700 directory). It never touches ~/.ssh.
-func TrustHostKey(appKnownHosts, host string, port int, key ssh.PublicKey) error {
+//
+// The key must have the fingerprint the user approved, and no known_hosts file
+// (the app file plus any otherKnownHosts) may hold a different key for the
+// host: a changed key is a hard stop. Re-trusting an already-trusted key is a
+// no-op.
+func TrustHostKey(appKnownHosts, host string, port int, key ssh.PublicKey, approvedFingerprint string, otherKnownHosts ...string) error {
 	if appKnownHosts == "" {
 		return errors.New("trust host key: no app known_hosts path")
 	}
-	if host == "" || strings.IndexFunc(host, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) || r == ',' }) >= 0 {
+	if key == nil {
+		return errors.New("trust host key: no key")
+	}
+	if host == "" || strings.IndexFunc(host, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || strings.ContainsRune("*?!|,[]", r)
+	}) >= 0 {
 		return fmt.Errorf("trust host key: invalid host %q", host)
 	}
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("trust host key: invalid port %d", port)
 	}
-	if err := os.MkdirAll(filepath.Dir(appKnownHosts), 0o700); err != nil {
+	if ssh.FingerprintSHA256(key) != approvedFingerprint {
+		return ErrFingerprintMismatch
+	}
+	if st, err := os.Lstat(appKnownHosts); err == nil && st.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("trust host key: %s is a symlink", appKnownHosts)
+	}
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+	checker, err := newHostKeyChecker(append(append([]string(nil), otherKnownHosts...), appKnownHosts))
+	if err != nil {
+		return err
+	}
+	var ke *knownhosts.KeyError
+	switch err := checker.check(address, hostAddr(address), key); {
+	case err == nil:
+		return nil // already trusted
+	case errors.As(err, &ke) && len(ke.Want) > 0:
+		return ErrHostKeyConflict
+	case errors.As(err, &ke):
+		// unknown: fall through and append
+	default:
+		return err
+	}
+
+	dir := filepath.Dir(appKnownHosts)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	f, err := os.OpenFile(appKnownHosts, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600)
@@ -149,7 +232,10 @@ func TrustHostKey(appKnownHosts, host string, port int, key ssh.PublicKey) error
 		return err
 	}
 	defer f.Close()
-	line := knownhosts.Line([]string{knownhosts.Normalize(net.JoinHostPort(host, strconv.Itoa(port)))}, key) + "\n"
+	if err := f.Chmod(0o600); err != nil {
+		return err
+	}
+	line := knownhosts.Line([]string{knownhosts.Normalize(address)}, key) + "\n"
 	if st, err := f.Stat(); err == nil && st.Size() > 0 {
 		last := make([]byte, 1)
 		if _, err := f.ReadAt(last, st.Size()-1); err == nil && last[0] != '\n' {

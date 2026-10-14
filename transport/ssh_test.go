@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
@@ -50,7 +51,7 @@ func TestUnknownThenTrustedHostKey(t *testing.T) {
 	if want := ssh.FingerprintSHA256(srv.hostKey); hk.Fingerprint != want || !strings.HasPrefix(hk.Fingerprint, "SHA256:") {
 		t.Fatalf("fingerprint = %q, want %q", hk.Fingerprint, want)
 	}
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
 	st, err := os.Stat(cfg.AppKnownHosts)
@@ -74,7 +75,7 @@ func TestChangedHostKeyIsMismatch(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "known_hosts"))
 	other := newTestSigner(t).PublicKey()
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, other); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, other, ssh.FingerprintSHA256(other)); err != nil {
 		t.Fatal(err)
 	}
 	d := NewSSH(cfg)
@@ -92,7 +93,7 @@ func TestChangedHostKeyIsMismatch(t *testing.T) {
 func TestOnlyLoopbackForwarding(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "known_hosts"))
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
 	d := NewSSH(cfg)
@@ -144,7 +145,7 @@ func TestNonDefaultPortMatchesBracketedEntry(t *testing.T) {
 	}
 	c.Close()
 	// and TrustHostKey writes the same bracketed form
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(cfg.AppKnownHosts)
@@ -176,7 +177,7 @@ func TestMalformedKnownHostsLineSkippedAndMissingFileOK(t *testing.T) {
 func TestRedialAfterServerRestart(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "known_hosts"))
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
 	d := NewSSH(cfg)
@@ -201,7 +202,7 @@ func TestRedialAfterServerRestart(t *testing.T) {
 func TestCloseTwiceAndDialAfterClose(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "known_hosts"))
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
 	d := NewSSH(cfg)
@@ -224,7 +225,7 @@ func TestCloseTwiceAndDialAfterClose(t *testing.T) {
 func TestConcurrentDialAgent(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "known_hosts"))
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
 	d := NewSSH(cfg)
@@ -252,7 +253,7 @@ func TestConcurrentDialAgent(t *testing.T) {
 func TestPassphraseCallbackForEncryptedKey(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "known_hosts"))
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
 	srv.encryptKey("s3cret")
@@ -279,7 +280,7 @@ func TestPassphraseCallbackForEncryptedKey(t *testing.T) {
 func TestKeepaliveClosesClientAfterMissedReplies(t *testing.T) {
 	srv := startTestSSHServer(t)
 	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "known_hosts"))
-	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey); err != nil {
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, ssh.FingerprintSHA256(srv.hostKey)); err != nil {
 		t.Fatal(err)
 	}
 	d := NewSSH(cfg).(*sshDialer)
@@ -298,5 +299,222 @@ func TestKeepaliveClosesClientAfterMissedReplies(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("client not closed after missed keepalives")
+	}
+}
+
+func TestTrustRefusals(t *testing.T) {
+	key := newTestSigner(t).PublicKey()
+	other := newTestSigner(t).PublicKey()
+	fp := ssh.FingerprintSHA256(key)
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app", "known_hosts")
+
+	if err := TrustHostKey(app, "h.example", 22, key, ssh.FingerprintSHA256(other)); !errors.Is(err, ErrFingerprintMismatch) {
+		t.Fatalf("fingerprint mismatch: %v", err)
+	}
+	if _, err := os.Stat(app); err == nil {
+		t.Fatal("file written despite refusal")
+	}
+	if err := TrustHostKey(app, "h.example", 22, key, fp); err != nil {
+		t.Fatal(err)
+	}
+	if err := TrustHostKey(app, "h.example", 22, key, fp); err != nil { // idempotent
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(app); strings.Count(string(b), "\n") != 1 {
+		t.Fatalf("duplicate line: %q", b)
+	}
+	// a different key (any type) for the same host: hard stop
+	if err := TrustHostKey(app, "h.example", 22, other, ssh.FingerprintSHA256(other)); !errors.Is(err, ErrHostKeyConflict) {
+		t.Fatalf("conflict in app file: %v", err)
+	}
+	// ...also when it is in another known_hosts file
+	user := filepath.Join(dir, "user_known_hosts")
+	os.WriteFile(user, []byte(knownhosts.Line([]string{"other.example"}, key)+"\n"), 0o600)
+	if err := TrustHostKey(app, "other.example", 22, other, ssh.FingerprintSHA256(other), user); !errors.Is(err, ErrHostKeyConflict) {
+		t.Fatalf("conflict in user file: %v", err)
+	}
+}
+
+func TestTrustRejectsPatternHosts(t *testing.T) {
+	key := newTestSigner(t).PublicKey()
+	app := filepath.Join(t.TempDir(), "kh")
+	for _, h := range []string{"*", "a*", "a?b", "!a", "|1|x|y", "a,b", "a b", "a\nb", "[a]", ""} {
+		if err := TrustHostKey(app, h, 22, key, ssh.FingerprintSHA256(key)); err == nil {
+			t.Errorf("host %q accepted", h)
+		}
+	}
+	if _, err := os.Stat(app); err == nil {
+		t.Fatal("file created")
+	}
+}
+
+func TestTrustEnforcesModesAndRefusesSymlink(t *testing.T) {
+	key := newTestSigner(t).PublicKey()
+	fp := ssh.FingerprintSHA256(key)
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "d")
+	os.Mkdir(sub, 0o755)
+	app := filepath.Join(sub, "kh")
+	os.WriteFile(app, nil, 0o644)
+	if err := TrustHostKey(app, "h.example", 22, key, fp); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(app); st.Mode().Perm() != 0o600 {
+		t.Fatalf("file mode %v", st.Mode().Perm())
+	}
+	if st, _ := os.Stat(sub); st.Mode().Perm() != 0o700 {
+		t.Fatalf("dir mode %v", st.Mode().Perm())
+	}
+	target := filepath.Join(dir, "victim")
+	os.WriteFile(target, []byte("keep\n"), 0o600)
+	link := filepath.Join(sub, "link")
+	os.Symlink(target, link)
+	if err := TrustHostKey(link, "h2.example", 22, key, fp); err == nil {
+		t.Fatal("wrote through symlink")
+	}
+	if b, _ := os.ReadFile(target); string(b) != "keep\n" {
+		t.Fatalf("victim modified: %q", b)
+	}
+}
+
+func TestBadHostFieldsDroppedGoodLineStillMatches(t *testing.T) {
+	srv := startTestSSHServer(t)
+	dir := t.TempDir()
+	cfg := srv.clientConfig(filepath.Join(dir, "app"))
+	user := filepath.Join(dir, "known_hosts")
+	k := knownhosts.Line([]string{"x"}, srv.hostKey)
+	keyPart := k[strings.Index(k, " ")+1:]
+	good := knownhosts.Line([]string{knownhosts.Normalize(net.JoinHostPort(srv.host, itoa(srv.port)))}, srv.hostKey)
+	var b strings.Builder
+	for _, h := range []string{"|1|bad|bad", "|2|AAAA|AAAA", "!", "[unbalanced", "host,!", "|1|AAAA"} {
+		b.WriteString(h + " " + keyPart + "\n")
+	}
+	b.WriteString(good + "\n")
+	os.WriteFile(user, []byte(b.String()), 0o600)
+	cfg.KnownHostsFiles = []string{user}
+	d := NewSSH(cfg)
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+}
+
+func serveAgent(t *testing.T, keyring agent.Agent) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "ag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "a.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() { agent.ServeAgent(keyring, c); c.Close() }()
+		}
+	}()
+	return sock
+}
+
+func trustedConfig(t *testing.T, srv *testSSHServer) SSHConfig {
+	cfg := srv.clientConfig(filepath.Join(t.TempDir(), "known_hosts"))
+	fp := ssh.FingerprintSHA256(srv.hostKey)
+	if err := TrustHostKey(cfg.AppKnownHosts, cfg.Host, cfg.Port, srv.hostKey, fp); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestKeyFileUsedWhenAgentIsEmpty(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, agent.NewKeyring()))
+	d := NewSSH(cfg)
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+}
+
+func TestAgentKeyWorksWithoutKeyFiles(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	cfg.KeyPath = ""
+	t.Setenv("HOME", t.TempDir()) // no default key files
+	raw, _ := os.ReadFile(srv.keyPath)
+	priv, err := ssh.ParseRawPrivateKey(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kr := agent.NewKeyring()
+	if err := kr.Add(agent.AddedKey{PrivateKey: priv}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, kr))
+	d := NewSSH(cfg)
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+}
+
+func TestSlowPassphraseDoesNotConsumeHandshakeTimeout(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	cfg.Passphrase = func(string) (string, error) { time.Sleep(400 * time.Millisecond); return "pw", nil }
+	d := NewSSH(cfg).(*sshDialer)
+	d.handshakeTimeout = 200 * time.Millisecond
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+}
+
+func TestWaiterHonoursContextWhileAnotherDialRuns(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	release := make(chan struct{})
+	started := make(chan struct{})
+	cfg.Passphrase = func(string) (string, error) { close(started); <-release; return "pw", nil }
+	d := NewSSH(cfg)
+	defer d.Close()
+	first := make(chan error, 1)
+	go func() {
+		c, err := d.DialAgent(context.Background())
+		if c != nil {
+			c.Close()
+		}
+		first <- err
+	}()
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	t0 := time.Now()
+	_, err := d.DialAgent(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(t0) > time.Second {
+		t.Fatalf("waiter: %v after %v", err, time.Since(t0))
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
 	}
 }
