@@ -94,6 +94,7 @@ func Shell(c *ui.Context, a *App, hostPanel func(c *ui.Context), content func())
 			ui.Scroll(c).Fill().Children(func() {
 				ui.Column(c).Padding(3 * components.Grid).Gap(2 * components.Grid).Children(func() {
 					ui.Text(c, title).FontSize(22).FontWeight(700)
+					a.noticeBanner(c)
 					if kind, text, ok := banner(v.Conn, now); ok {
 						components.Banner(c, kind, text)
 					}

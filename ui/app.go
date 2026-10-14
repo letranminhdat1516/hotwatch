@@ -35,6 +35,12 @@ type App struct {
 	docker    *pages.Docker
 	onColumns func(page string, cols []string)
 
+	notice   string                // SetNotice; "" when dismissed
+	onFrame  func(start time.Time) // SetFrameHook
+	prompts  []passPrompt          // AskPassphrase queue; the first is shown
+	pass     string                // the shown prompt's input
+	passOpen bool
+
 	// Shell state: the top bar's tab index into tabKeys (the last frame's
 	// visible pages), and the split between content and host panel.
 	tab     int
@@ -161,6 +167,7 @@ func (a *App) selectHost(id string) {
 
 // View builds the window content.
 func (a *App) View(c *ui.Context) {
+	start := a.now()
 	v := a.views[a.selected]
 	Shell(c, a, a.drawHostPanel, func() {
 		switch a.page {
@@ -175,6 +182,10 @@ func (a *App) View(c *ui.Context) {
 			components.EmptyState(c, "This page is not built yet.")
 		}
 	})
+	a.passphraseDialog(c)
+	if a.onFrame != nil {
+		a.onFrame(start)
+	}
 }
 
 func (a *App) drawHostPanel(c *ui.Context) {
