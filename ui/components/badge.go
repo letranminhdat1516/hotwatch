@@ -10,9 +10,9 @@ import (
 type Tone int
 
 const (
-	Neutral   Tone = iota // grey: paused, read-only, connecting
+	Neutral   Tone = iota // grey: read-only, connecting, created
 	Good                  // green: online, running
-	Attention             // amber: stale, restarting, needs confirmation
+	Attention             // amber: stale, restarting, paused, needs confirmation
 	Bad                   // red: offline, error, exited
 )
 
@@ -38,7 +38,7 @@ var states = map[string]stateLook{
 	"unauthorized":    {Bad, "Not authorized"},
 	"incompatible":    {Bad, "Incompatible agent"},
 	"hostkeymismatch": {Bad, "Host key changed"},
-	"paused":          {Neutral, "Paused"},
+	"paused":          {Attention, "Paused"},
 	"read-only":       {Neutral, "Read-only"},
 	"connecting":      {Neutral, "Connecting"},
 	"created":         {Neutral, "Created"},
@@ -74,7 +74,7 @@ func ToneColor(t *ui.Theme, tone Tone) ui.Color {
 }
 
 // StateColor is the theme token a state's badge uses: green online/running,
-// amber stale/needs confirmation, red offline/error, grey paused/read-only.
+// amber stale/needs confirmation, red offline/error, grey read-only/created.
 func StateColor(t *ui.Theme, state string) ui.Color { return ToneColor(t, look(state).tone) }
 
 // Badge shows a state as a tinted pill with a dot and a plain label.

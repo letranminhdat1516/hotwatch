@@ -90,7 +90,7 @@ func TestBadgeStateColours(t *testing.T) {
 		{"exited", "Exited", func(t *ui.Theme) ui.Color { return t.Danger }},
 		{"Unauthorized", "Not authorized", func(t *ui.Theme) ui.Color { return t.Danger }},
 		{"HostKeyMismatch", "Host key changed", func(t *ui.Theme) ui.Color { return t.Danger }},
-		{"paused", "Paused", func(t *ui.Theme) ui.Color { return t.TextMuted }},
+		{"paused", "Paused", func(t *ui.Theme) ui.Color { return t.Warning }},
 		{"read-only", "Read-only", func(t *ui.Theme) ui.Color { return t.TextMuted }},
 		{"Connecting", "Connecting", func(t *ui.Theme) ui.Color { return t.TextMuted }},
 		{"normal", "Normal", func(t *ui.Theme) ui.Color { return t.Success }},

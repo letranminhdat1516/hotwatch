@@ -31,6 +31,7 @@ type App struct {
 
 	acts      *pages.Actions
 	procs     *pages.Processes
+	docker    *pages.Docker
 	onColumns func(page string, cols []string)
 
 	// Shell state: the top bar's tab index into tabKeys (the last frame's
@@ -47,7 +48,7 @@ type App struct {
 func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.Runner, onSelect func(hostID, page string)) *App {
 	a := &App{hosts: slices.Clone(hosts), actions: actions, onSelect: onSelect, page: "overview",
 		views: map[string]hub.HostView{}, now: time.Now, panelW: DefaultPanelWidth,
-		acts: pages.NewActions(actions), procs: pages.NewProcesses()}
+		acts: pages.NewActions(actions), procs: pages.NewProcesses(), docker: pages.NewDocker()}
 	a.procs.OnColumns = func(cols []string) {
 		if a.onColumns != nil {
 			a.onColumns("processes", cols)
@@ -71,6 +72,13 @@ func (a *App) Apply(id string, v hub.HostView) {
 // ApplyAction records an action snapshot published by the runner, keeping
 // the highest Seq per action. Call it on the main thread.
 func (a *App) ApplyAction(act hub.Action) { a.acts.Apply(act) }
+
+// SetLogsOpener sets how the Docker page reaches container logs.
+func (a *App) SetLogsOpener(o pages.LogsOpener) { a.docker.SetLogsOpener(o) }
+
+// SetPost sets how the log reader hands work to the main thread, such as
+// win.Update. Without one the work runs on the reader's goroutine.
+func (a *App) SetPost(post func(func())) { a.docker.SetPost(post) }
 
 // SetColumnsHook sets the function called with a page's visible column ids,
 // in order, when the user hides, shows or moves one; the caller persists them.
@@ -130,6 +138,7 @@ func (a *App) setPage(page string) {
 	if page == a.page {
 		return
 	}
+	a.docker.CloseLogs()
 	a.page = page
 	a.onSelect(a.selected, page)
 }
@@ -139,6 +148,7 @@ func (a *App) selectHost(id string) {
 	if id == a.selected {
 		return
 	}
+	a.docker.CloseLogs()
 	a.selected = id
 	a.onSelect(id, a.page)
 }
@@ -153,6 +163,8 @@ func (a *App) View(c *ui.Context) {
 		case "processes":
 			a.procs.Render(c, pages.ProcessesInput{HostID: a.selected, View: v, Gen: a.gen, Now: a.now(),
 				Width: a.split - 6*components.Grid, Actions: a.acts})
+		case "docker":
+			a.docker.Render(c, pages.DockerInput{HostID: a.selected, View: v, Gen: a.gen, Now: a.now(), Actions: a.acts})
 		default:
 			components.EmptyState(c, "This page is not built yet.")
 		}

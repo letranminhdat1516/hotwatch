@@ -56,3 +56,16 @@ func (s *Actions) Last(hostID string, kind hub.ActionKind) (hub.Action, bool) {
 	}
 	return last, found
 }
+
+// LastOn returns the most recently started action of kind on target of
+// hostID.
+func (s *Actions) LastOn(hostID string, kind hub.ActionKind, target string) (hub.Action, bool) {
+	var last hub.Action
+	found := false
+	for _, a := range s.byID {
+		if a.HostID == hostID && a.Kind == kind && a.Target == target && (!found || a.ID > last.ID) {
+			last, found = a, true
+		}
+	}
+	return last, found
+}
