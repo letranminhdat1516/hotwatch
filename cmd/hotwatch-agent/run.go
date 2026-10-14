@@ -48,14 +48,6 @@ type wallClock struct{}
 func (wallClock) Now() time.Time                         { return time.Now() }
 func (wallClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
-// unwiredSignaller refuses every signal until the process-signalling backend
-// is wired in.
-type unwiredSignaller struct{}
-
-func (unwiredSignaller) Signal(int32, time.Time, model.Signal) error {
-	return &model.APIError{Code: "forbidden", Message: "process signalling is not available in this build"}
-}
-
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	path := fs.String("config", agent.DefaultConfigPath, "config file")
@@ -77,7 +69,14 @@ func cmdRun(args []string) error {
 		return fmt.Errorf("audit log: %w", err)
 	}
 	defer audit.Close()
-	return serve(cfg, *path, audit, unwiredSignaller{})
+	return serve(cfg, *path, audit, agent.NewSystemSignaller(procLookup))
+}
+
+// procLookup reads one process's start time straight from /proc, so it never
+// races the sampler's collector.
+func procLookup(_ context.Context, pid int32) (model.Process, bool, error) {
+	st, ok, err := linux.ProcessStart("/", pid)
+	return model.Process{PID: pid, StartTime: st}, ok, err
 }
 
 func serve(cfg agent.FileConfig, cfgPath string, audit io.Writer, sig agent.Signaller) error {

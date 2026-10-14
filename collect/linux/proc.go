@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -155,7 +157,7 @@ func (c *collector) scanPID(pid int32, buf []byte, btime int64, listeners map[ui
 	r.proc = model.Process{
 		PID:       pid,
 		PPID:      st.ppid,
-		StartTime: time.Unix(btime+int64(st.start/clkTck), int64(st.start%clkTck)*(1e9/clkTck)),
+		StartTime: startTime(btime, st.start),
 		Name:      st.comm,
 		Threads:   st.threads,
 	}
@@ -180,6 +182,35 @@ func (c *collector) scanPID(pid int32, buf []byte, btime int64, listeners map[ui
 	r.proc.Ports = processPorts(dir+"/fd", listeners)
 	r.ok = true
 	return r
+}
+
+// startTime converts starttime ticks since boot to wall-clock time. The
+// collector and ProcessStart share it so values compare exactly.
+func startTime(btime int64, ticks uint64) time.Time {
+	return time.Unix(btime+int64(ticks/clkTck), int64(ticks%clkTck)*(1e9/clkTck))
+}
+
+// ProcessStart returns the start time of one process, read from
+// <root>/proc/<pid>/stat and btime only (no full process scan). ok is false
+// when the process does not exist. The result is identical to the StartTime
+// the collector reports for the same process.
+func ProcessStart(root string, pid int32) (start time.Time, ok bool, err error) {
+	b, err := os.ReadFile(filepath.Join(root, "proc", strconv.Itoa(int(pid)), "stat"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	st, parsed := parseStat(b)
+	if !parsed {
+		return time.Time{}, false, errors.New("unparseable /proc/<pid>/stat")
+	}
+	btime, err := readBtime(filepath.Join(root, "proc", "stat"))
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return startTime(btime, st.start), true, nil
 }
 
 // readInto reads the whole (small) file into buf, returning the filled part.

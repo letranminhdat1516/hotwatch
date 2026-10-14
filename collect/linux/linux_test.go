@@ -123,3 +123,23 @@ func TestMissingFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestProcessStart(t *testing.T) {
+	st, ok, err := ProcessStart("testdata/a0", 4242)
+	if err != nil || !ok || !st.Equal(time.Unix(1700000000+5000, 0)) {
+		t.Fatalf("got %v %v %v", st, ok, err)
+	}
+	// Same formula as the collector, so values compare exactly.
+	ps, err := New("testdata/a0").Processes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range ps {
+		if p.PID == 4242 && !p.StartTime.Equal(st) {
+			t.Fatalf("collector %v != ProcessStart %v", p.StartTime, st)
+		}
+	}
+	if _, ok, err := ProcessStart("testdata/a0", 99999); ok || err != nil {
+		t.Fatalf("missing pid: ok=%v err=%v", ok, err)
+	}
+}
