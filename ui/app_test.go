@@ -23,15 +23,19 @@ func testApp(v hub.HostView) *hwui.App {
 func TestOverviewShowsCardsAndHidesAbsentHardware(t *testing.T) {
 	app := testApp(hub.HostView{Snap: &model.Snapshot{CPU: model.CPU{Total: 37.5}, Battery: nil}})
 	tt := ui.NewTester(app.View, 1200, 800)
-	for _, want := range []string{"CPU", "37.5 %", "Memory", "Disk", "Network"} {
-		if !tt.HasText(want) {
-			t.Fatalf("missing %q in %q", want, tt.Texts())
+	if !slices.Contains(tt.Texts(), "37.5 %") {
+		t.Fatalf("missing CPU value in %q", tt.Texts())
+	}
+	for _, want := range []string{"CPU", "Memory", "Disk", "Network"} {
+		// one in the top bar, one as the card title
+		if n := count(tt, want); n != 2 {
+			t.Fatalf("%q shown %d times, want 2: %q", want, n, tt.Texts())
 		}
 	}
-	if tt.HasText("Battery") {
+	if slices.Contains(tt.Texts(), "Battery") {
 		t.Fatal("battery card shown without a battery")
 	}
-	if tt.HasText("Apple M3") {
+	if slices.Contains(tt.Texts(), "Apple M3") {
 		t.Fatal("gpu card shown without a gpu")
 	}
 }
@@ -40,10 +44,10 @@ func TestOverviewUnknownRatesAreDashes(t *testing.T) {
 	snap := &model.Snapshot{Net: []model.Interface{{Name: "en0", Up: true}}}
 	app := testApp(hub.HostView{Snap: snap})
 	tt := ui.NewTester(app.View, 1200, 800)
-	if !tt.HasText("In —") || !tt.HasText("Out —") {
+	if !slices.Contains(tt.Texts(), "In —") || !slices.Contains(tt.Texts(), "Out —") {
 		t.Fatalf("nil rates must render as a dash: %q", tt.Texts())
 	}
-	if tt.HasText("In 0 B/s") {
+	if slices.Contains(tt.Texts(), "In 0 B/s") {
 		t.Fatalf("unknown rate rendered as zero: %q", tt.Texts())
 	}
 }
@@ -90,20 +94,21 @@ func TestOverviewPartialSectionIsUnknown(t *testing.T) {
 func TestOverviewNetworkSkipsLoopbackAndDownInterfaces(t *testing.T) {
 	snap := &model.Snapshot{Net: []model.Interface{
 		{Name: "lo", Up: true, RxBps: f64(5000)},
+		{Name: "lo0", Up: true, RxBps: f64(9000), TxBps: f64(9000)},
 		{Name: "en1", Up: false, RxBps: f64(7000)},
 		{Name: "en0", Up: true, RxBps: f64(1024), TxBps: f64(0)},
 	}}
 	tt := ui.NewTester(testApp(hub.HostView{Snap: snap}).View, 1200, 800)
-	if !tt.HasText("In 1.0 KB/s") || !tt.HasText("Out 0 B/s") {
+	if !slices.Contains(tt.Texts(), "In 1.0 KB/s") || !slices.Contains(tt.Texts(), "Out 0 B/s") {
 		t.Fatalf("texts %q", tt.Texts())
 	}
 }
 
 func TestOverviewOneCardPerGPU(t *testing.T) {
-	snap := &model.Snapshot{GPUs: []model.GPU{{Name: "GPU A", UtilPct: f64(10)}, {Name: "GPU B", UtilPct: f64(20)}}}
+	snap := &model.Snapshot{GPUs: []model.GPU{{Name: "GPU A", UtilPct: f64(10)}, {Name: "GPU B", UtilPct: f64(20)}, {UtilPct: f64(30)}}}
 	tt := ui.NewTester(testApp(hub.HostView{Snap: snap}).View, 1200, 800)
-	for _, w := range []string{"GPU A", "10.0 %", "GPU B", "20.0 %"} {
-		if !tt.HasText(w) {
+	for _, w := range []string{"GPU A", "10.0 %", "GPU B", "20.0 %", "GPU 3", "30.0 %"} {
+		if !slices.Contains(tt.Texts(), w) {
 			t.Fatalf("missing %q in %q", w, tt.Texts())
 		}
 	}
@@ -112,10 +117,10 @@ func TestOverviewOneCardPerGPU(t *testing.T) {
 func TestOverviewWaitingForData(t *testing.T) {
 	app := testApp(hub.HostView{})
 	tt := ui.NewTester(app.View, 1200, 800)
-	if !tt.HasText("Waiting for data…") {
+	if !slices.Contains(tt.Texts(), "Waiting for data…") {
 		t.Fatalf("no waiting state: %q", tt.Texts())
 	}
-	if tt.HasText("CPU") {
+	if count(tt, "CPU") != 1 { // the top bar item only
 		t.Fatalf("cards shown before first snapshot: %q", tt.Texts())
 	}
 }
@@ -129,7 +134,7 @@ func TestOverviewShowsGPUAndBatteryWhenPresent(t *testing.T) {
 	app := testApp(hub.HostView{Snap: snap})
 	tt := ui.NewTester(app.View, 1200, 800)
 	for _, want := range []string{"Apple M3", "12.5 %", "Battery", "80.0 %", "Uptime 3h 2m"} {
-		if !tt.HasText(want) {
+		if !slices.Contains(tt.Texts(), want) {
 			t.Fatalf("missing %q in %q", want, tt.Texts())
 		}
 	}
@@ -142,7 +147,7 @@ func TestApplyCopiesAndReplaces(t *testing.T) {
 	app.Apply("h1", hub.HostView{Snap: snap})
 	snap.CPU.Total = 99 // mutation after Apply must not leak into the view
 	tt.Frame()
-	if !tt.HasText("50.0 %") || tt.HasText("99.0 %") {
+	if !slices.Contains(tt.Texts(), "50.0 %") || slices.Contains(tt.Texts(), "99.0 %") {
 		t.Fatalf("Apply did not copy: %q", tt.Texts())
 	}
 }

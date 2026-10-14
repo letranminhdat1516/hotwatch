@@ -9,6 +9,8 @@ import (
 
 	"hotwatch/hub"
 	"hotwatch/store"
+	"hotwatch/ui/components"
+	"hotwatch/ui/icons"
 	"hotwatch/ui/pages"
 )
 
@@ -23,13 +25,21 @@ type App struct {
 	page     string
 	views    map[string]hub.HostView
 	now      func() time.Time
+
+	// Shell state: the top bar's tab index into tabKeys (the last frame's
+	// visible pages), and the split between content and host panel.
+	tab     int
+	tabKeys []string
+	split   float32 // content width
+	panelW  float32
+	lastW   float32 // window width the split was last fitted to
 }
 
 // NewApp seeds the per-host state from views(id) for each host. The first host
 // is selected and the Overview page shown.
 func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.Runner, onSelect func(hostID, page string)) *App {
 	a := &App{hosts: slices.Clone(hosts), actions: actions, onSelect: onSelect, page: "overview",
-		views: map[string]hub.HostView{}, now: time.Now}
+		views: map[string]hub.HostView{}, now: time.Now, panelW: DefaultPanelWidth}
 	for _, h := range a.hosts {
 		a.views[h.ID] = copyView(views(h.ID))
 	}
@@ -75,27 +85,60 @@ func (a *App) host() (store.Host, bool) {
 	return store.Host{}, false
 }
 
+// setPage opens page on the selected host.
+func (a *App) setPage(page string) {
+	if page == a.page {
+		return
+	}
+	a.page = page
+	a.onSelect(a.selected, page)
+}
+
+// selectHost switches every page to host id.
+func (a *App) selectHost(id string) {
+	if id == a.selected {
+		return
+	}
+	a.selected = id
+	a.onSelect(id, a.page)
+}
+
 // View builds the window content.
 func (a *App) View(c *ui.Context) {
-	t := c.Theme()
-	h, ok := a.host()
 	v := a.views[a.selected]
-	now := a.now()
-	ui.Column(c).Fill().Padding(20).Gap(16).Children(func() {
-		ui.Row(c).Gap(12).Children(func() {
-			ui.Text(c, "Overview").FontSize(22).Bold()
-			ui.Spacer(c)
-			if ok {
-				ui.Text(c, h.Name).Bold()
-				if v.Conn.State != "" {
-					ui.Text(c, string(v.Conn.State)).TextColor(t.TextMuted)
-				}
-				if !v.Conn.LastOK.IsZero() {
-					ui.Textf(c, "Updated %s ago", now.Sub(v.Conn.LastOK).Round(time.Second)).TextColor(t.TextMuted)
-					c.After(time.Second)
-				}
+	Shell(c, a, a.hostPanel, func() {
+		switch a.page {
+		case "overview":
+			pages.Overview(c, v, a.now())
+		default:
+			components.EmptyState(c, "This page is not built yet.")
+		}
+	})
+}
+
+// hostPanel is a placeholder list of the hosts until the grouped host
+// panel (E3) replaces it.
+func (a *App) hostPanel(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).Padding(2*components.Grid, components.Grid).Gap(2).Children(func() {
+		ui.Text(c, "Hosts").FontSize(12).FontWeight(600).TextColor(t.TextMuted).Padding(0, components.Grid, components.Grid, components.Grid)
+		for _, h := range a.hosts {
+			row := ui.Row(c).Key(h.ID).Gap(components.Grid).Padding(6, components.Grid).Radius(components.Grid)
+			if h.ID == a.selected {
+				row.Background(t.Accent.Alpha(0.12))
+			} else if row.Hovered() {
+				row.Background(t.SurfaceHover)
 			}
-		})
-		pages.Overview(c, v, now)
+			if row.Clicked() {
+				a.selectHost(h.ID)
+			}
+			row.Children(func() {
+				ui.Icon(c, icons.Host).FontSize(14).TextColor(t.TextMuted)
+				ui.Text(c, h.Name).FontSize(13).SingleLine().Grow(1)
+				if st := a.views[h.ID].Conn.State; st != "" {
+					ui.Box(c).Size(8, 8).Radius(4).Background(components.StateColor(t, string(st)))
+				}
+			})
+		}
 	})
 }

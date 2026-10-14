@@ -16,7 +16,7 @@ var byteUnits = [...]string{"B", "KB", "MB", "GB", "TB", "PB"}
 func valid(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 }
 
 // humanize picks the unit first and moves to the next one when the rounded
-// value would print as 1024.
+// value would print as 1024. Values beyond the largest unit are unknown.
 func humanize(v float64) string {
 	i := 0
 	for v >= 1024 && i < len(byteUnits)-1 {
@@ -30,7 +30,10 @@ func humanize(v float64) string {
 		v /= 1024
 		i++
 	}
-	if math.Round(v*10)/10 >= 1024 && i < len(byteUnits)-1 {
+	if math.Round(v*10)/10 >= 1024 {
+		if i == len(byteUnits)-1 {
+			return Unknown
+		}
 		v /= 1024
 		i++
 	}
@@ -46,15 +49,27 @@ func Rate(bps *float64) string {
 	if bps == nil || !valid(*bps) {
 		return Unknown
 	}
-	return humanize(*bps) + "/s"
+	if h := humanize(*bps); h != Unknown {
+		return h + "/s"
+	}
+	return Unknown
+}
+
+// Number formats a value with one decimal: "37.5". nil and non-finite are
+// unknown.
+func Number(p *float64) string {
+	if p == nil || math.IsNaN(*p) || math.IsInf(*p, 0) {
+		return Unknown
+	}
+	return fmt.Sprintf("%.1f", *p)
 }
 
 // Percent formats a percentage: "37.5 %". nil and non-finite are unknown.
 func Percent(p *float64) string {
-	if p == nil || math.IsNaN(*p) || math.IsInf(*p, 0) {
-		return Unknown
+	if n := Number(p); n != Unknown {
+		return n + " %"
 	}
-	return fmt.Sprintf("%.1f %%", *p)
+	return Unknown
 }
 
 // Load formats the three load averages; unknown if any is invalid.
@@ -81,4 +96,13 @@ func Duration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", m/60, m%60)
 	}
 	return fmt.Sprintf("%dm", m)
+}
+
+// Ago formats how long ago something happened: "12s ago", "2m ago",
+// "3h 2m ago". A negative age (clock skew) is "0s ago".
+func Ago(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds ago", max(int(d/time.Second), 0))
+	}
+	return Duration(d) + " ago"
 }
