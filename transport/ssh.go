@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,15 +65,18 @@ type sshDialer struct {
 
 	handshakeTimeout time.Duration // tests shorten this
 	dialSem          chan struct{} // serialises connects; waiters honour ctx
-	mu               sync.Mutex    // guards the fields below
-	sess             *sshSession
-	closed           bool
+	// decrypted and prompted are guarded by dialSem and live in memory only.
+	decrypted []ssh.Signer
+	prompted  map[string]bool
+	mu        sync.Mutex // guards the fields below
+	sess      *sshSession
+	closed    bool
 }
 
 // NewSSH returns a Dialer that tunnels to 127.0.0.1:AgentPort on the host over
 // one reused SSH connection. It opens only direct-tcpip channels.
 func NewSSH(cfg SSHConfig) Dialer {
-	return &sshDialer{cfg: cfg, keepaliveEvery: sshKeepaliveEvery, handshakeTimeout: sshConnectTimeout, dialSem: make(chan struct{}, 1)}
+	return &sshDialer{cfg: cfg, keepaliveEvery: sshKeepaliveEvery, handshakeTimeout: sshConnectTimeout, dialSem: make(chan struct{}, 1), prompted: map[string]bool{}}
 }
 
 var errDialerClosed = errors.New("ssh dialer closed")
@@ -189,12 +194,52 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 		}
 		username = u.Username
 	}
-	// Load (and decrypt) key files before dialing so a passphrase prompt
-	// is not bounded by the handshake deadline.
-	fileSigners, err := d.fileSigners()
-	if err != nil {
-		return nil, err
+
+	// First attempt: agent keys, cached decrypted keys and key files that
+	// need no passphrase. Passphrases are asked only if that fails.
+	plain, encrypted, keyErr := d.loadFileKeys()
+	s, err := d.handshake(ctx, address, username, checker, append(append([]ssh.Signer(nil), d.decrypted...), plain...))
+	if err == nil || !isAuthFailure(err) || len(encrypted) == 0 || cfg.Passphrase == nil {
+		return s, wrapKeyErr(err, keyErr)
 	}
+	// Prompt outside any handshake deadline, then reconnect once.
+	added := false
+	for _, k := range encrypted {
+		d.prompted[k.path] = true // never ask twice, even if declined
+		pass, perr := cfg.Passphrase(k.path)
+		if perr != nil {
+			log.Printf("ssh: passphrase for %s not provided: %v", k.path, perr)
+			continue
+		}
+		signer, perr := ssh.ParsePrivateKeyWithPassphrase(k.raw, []byte(pass))
+		if perr != nil {
+			log.Printf("ssh: cannot decrypt %s: %v", k.path, perr)
+			continue
+		}
+		d.decrypted = append(d.decrypted, signer)
+		added = true
+	}
+	if !added || ctx.Err() != nil {
+		return nil, wrapKeyErr(err, keyErr)
+	}
+	s, err = d.handshake(ctx, address, username, checker, append(append([]ssh.Signer(nil), d.decrypted...), plain...))
+	return s, wrapKeyErr(err, keyErr)
+}
+
+func isAuthFailure(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "unable to authenticate")
+}
+
+// wrapKeyErr explains an authentication failure with the key-file problem, if any.
+func wrapKeyErr(err, keyErr error) error {
+	if err != nil && keyErr != nil && isAuthFailure(err) {
+		return fmt.Errorf("%w (%v)", err, keyErr)
+	}
+	return err
+}
+
+// handshake dials and authenticates with agent signers followed by extra.
+func (d *sshDialer) handshake(ctx context.Context, address, username string, checker *hostKeyChecker, extra []ssh.Signer) (*sshSession, error) {
 	agentConn := d.dialAgentSocket()
 	// One "publickey" method: x/crypto tries only the first method of a
 	// given name, so agent keys and file keys share one chain.
@@ -205,7 +250,7 @@ func (d *sshDialer) connect(ctx context.Context) (*sshSession, error) {
 				all = append(all, as...)
 			}
 		}
-		return append(all, fileSigners...), nil
+		return append(all, extra...), nil
 	}
 	ccfg := &ssh.ClientConfig{
 		User:              username,
@@ -259,8 +304,16 @@ func (d *sshDialer) dialAgentSocket() net.Conn {
 	return c
 }
 
-// fileSigners loads the configured key, or the default ones that exist.
-func (d *sshDialer) fileSigners() ([]ssh.Signer, error) {
+type encryptedKey struct {
+	path string
+	raw  []byte
+}
+
+// loadFileKeys reads the configured key (or the default ones that exist).
+// Unencrypted keys come back as signers; encrypted ones not yet prompted for
+// are returned for a later, on-demand passphrase prompt. An unreadable
+// explicit key is reported as keyErr, not fatal.
+func (d *sshDialer) loadFileKeys() (plain []ssh.Signer, encrypted []encryptedKey, keyErr error) {
 	var paths []string
 	explicit := d.cfg.KeyPath != ""
 	if explicit {
@@ -270,36 +323,32 @@ func (d *sshDialer) fileSigners() ([]ssh.Signer, error) {
 			paths = append(paths, filepath.Join(home, ".ssh", n))
 		}
 	}
-	var signers []ssh.Signer
 	for _, p := range paths {
 		raw, err := os.ReadFile(p)
 		if err != nil {
 			if explicit {
-				return nil, fmt.Errorf("read ssh key %s: %w", p, err)
+				log.Printf("ssh: skipping key %s: %v", p, err)
+				keyErr = fmt.Errorf("read ssh key %s: %w", p, err)
 			}
 			continue
 		}
 		signer, err := ssh.ParsePrivateKey(raw)
 		var pm *ssh.PassphraseMissingError
-		if errors.As(err, &pm) {
-			if d.cfg.Passphrase == nil {
-				continue
+		switch {
+		case errors.As(err, &pm):
+			if !d.prompted[p] {
+				encrypted = append(encrypted, encryptedKey{p, raw})
 			}
-			pass, perr := d.cfg.Passphrase(p)
-			if perr != nil {
-				return signers, perr
-			}
-			signer, err = ssh.ParsePrivateKeyWithPassphrase(raw, []byte(pass))
-		}
-		if err != nil {
+		case err != nil:
 			if explicit {
-				return nil, fmt.Errorf("parse ssh key %s: %w", p, err)
+				log.Printf("ssh: skipping key %s: %v", p, err)
+				keyErr = fmt.Errorf("parse ssh key %s: %w", p, err)
 			}
-			continue
+		default:
+			plain = append(plain, signer)
 		}
-		signers = append(signers, signer)
 	}
-	return signers, nil
+	return plain, encrypted, keyErr
 }
 
 // keepalive pings the server and closes the client after sshKeepaliveMiss

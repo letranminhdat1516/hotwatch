@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"golang.org/x/sys/unix"
 )
 
 // hostKeyChecker verifies server host keys against a set of known_hosts files.
@@ -44,9 +45,11 @@ func newHostKeyChecker(files []string) (*hostKeyChecker, error) {
 			if len(line) == 0 || line[0] == '#' {
 				continue
 			}
-			if _, _, _, _, _, err := ssh.ParseKnownHosts(line); err != nil || !validHostField(line) {
+			fixed, ok := sanitizeLine(line)
+			if !ok {
 				continue // malformed line: skipped, not fatal
 			}
+			line = fixed
 			clean = append(clean, line...)
 			clean = append(clean, '\n')
 		}
@@ -131,17 +134,47 @@ func (c *hostKeyChecker) callback() ssh.HostKeyCallback {
 	}
 }
 
-// validHostField mirrors the host-pattern checks knownhosts.New applies, so a
-// line it would reject (and that would fail every host) is dropped instead.
-func validHostField(line []byte) bool {
-	fields := strings.Fields(string(line))
-	if len(fields) > 0 && strings.HasPrefix(fields[0], "@") {
-		fields = fields[1:]
+// nextWord splits at the first space or tab, like x/crypto/ssh/knownhosts.
+func nextWord(line string) (word, rest string) {
+	i := strings.IndexAny(line, "\t ")
+	if i < 0 {
+		return line, ""
 	}
-	if len(fields) == 0 {
+	return line[:i], strings.Trim(line[i:], " \t")
+}
+
+// sanitizeLine returns a line knownhosts.New will accept, or false to drop it.
+// Lines whose host field knownhosts.New would reject are dropped, except
+// @revoked lines: revocation is keyed by the key, not the host, so dropping
+// one would silently un-revoke the key. Those keep the line with host "*".
+func sanitizeLine(line []byte) ([]byte, bool) {
+	if _, _, _, _, _, err := ssh.ParseKnownHosts(line); err != nil {
+		return nil, false
+	}
+	s := string(line)
+	marker := ""
+	w, rest := nextWord(s)
+	if w == "@revoked" || w == "@cert-authority" {
+		marker, s = w, rest
+	}
+	host, rest := nextWord(s)
+	if rest == "" {
+		return nil, false
+	}
+	if validHost(host) {
+		return line, true
+	}
+	if marker != "@revoked" {
+		return nil, false
+	}
+	return []byte("@revoked * " + rest), true
+}
+
+// validHost mirrors the host-pattern checks knownhosts.New applies.
+func validHost(host string) bool {
+	if host == "" || host[0] == '@' {
 		return false
 	}
-	host := fields[0]
 	if host[0] == '|' {
 		parts := strings.Split(host, "|")
 		if len(parts) != 4 || parts[1] != "1" {
@@ -221,13 +254,16 @@ func TrustHostKey(appKnownHosts, host string, port int, key ssh.PublicKey, appro
 	}
 
 	dir := filepath.Dir(appKnownHosts)
+	if st, err := os.Lstat(dir); err == nil && st.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("trust host key: %s is a symlink", dir)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(appKnownHosts, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600)
+	f, err := os.OpenFile(appKnownHosts, os.O_RDWR|os.O_APPEND|os.O_CREATE|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return err
 	}

@@ -518,3 +518,144 @@ func TestWaiterHonoursContextWhileAnotherDialRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func keyringWithClientKey(t *testing.T, srv *testSSHServer) agent.Agent {
+	t.Helper()
+	raw, _ := os.ReadFile(srv.keyPath)
+	priv, err := ssh.ParseRawPrivateKey(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kr := agent.NewKeyring()
+	if err := kr.Add(agent.AddedKey{PrivateKey: priv}); err != nil {
+		t.Fatal(err)
+	}
+	return kr
+}
+
+func TestAgentKeyMeansNoPassphrasePrompt(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	kr := keyringWithClientKey(t, srv)
+	srv.encryptKey("pw") // KeyPath now encrypted
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, kr))
+	calls := 0
+	cfg.Passphrase = func(string) (string, error) { calls++; return "pw", nil }
+	d := NewSSH(cfg)
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if calls != 0 {
+		t.Fatalf("passphrase prompted %d times", calls)
+	}
+}
+
+func TestEncryptedKeyPromptsOnceAcrossRedial(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	calls := 0
+	cfg.Passphrase = func(string) (string, error) { calls++; return "pw", nil }
+	d := NewSSH(cfg)
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	srv.restart()
+	c, err = d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if calls != 1 {
+		t.Fatalf("passphrase prompted %d times, want 1", calls)
+	}
+}
+
+func TestDeclinedPassphraseIsNotFatalAndNotRepeated(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	srv.encryptKey("pw")
+	calls := 0
+	cfg.Passphrase = func(string) (string, error) { calls++; return "", errors.New("declined") }
+	d := NewSSH(cfg)
+	defer d.Close()
+	_, err := d.DialAgent(context.Background())
+	if err == nil || strings.Contains(err.Error(), "declined") && !strings.Contains(err.Error(), "authenticate") {
+		t.Fatalf("want auth failure, got %v", err)
+	}
+	d.DialAgent(context.Background())
+	if calls != 1 {
+		t.Fatalf("prompted %d times, want 1", calls)
+	}
+}
+
+func TestUnreadableKeyPathDoesNotBlockAgent(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	cfg.KeyPath = filepath.Join(t.TempDir(), "missing")
+	t.Setenv("SSH_AUTH_SOCK", serveAgent(t, keyringWithClientKey(t, srv)))
+	d := NewSSH(cfg)
+	defer d.Close()
+	c, err := d.DialAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+}
+
+func TestUnreadableKeyPathWithNoSignersIsAnError(t *testing.T) {
+	srv := startTestSSHServer(t)
+	cfg := trustedConfig(t, srv)
+	cfg.KeyPath = filepath.Join(t.TempDir(), "missing")
+	d := NewSSH(cfg)
+	defer d.Close()
+	_, err := d.DialAgent(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("want error naming the key file, got %v", err)
+	}
+}
+
+func revokedFixture(t *testing.T, srv *testSSHServer, hostField string) SSHConfig {
+	cfg := trustedConfig(t, srv)
+	k := knownhosts.Line([]string{"x"}, srv.hostKey)
+	keyPart := k[strings.Index(k, " ")+1:]
+	f := filepath.Join(t.TempDir(), "user_kh")
+	os.WriteFile(f, []byte("@revoked\t"+hostField+" "+keyPart+"\n"), 0o600)
+	cfg.KnownHostsFiles = []string{f}
+	return cfg
+}
+
+func TestRevokedLineSurvivesMalformedHostField(t *testing.T) {
+	for _, hf := range []string{"[unbalanced", "|1|bad|bad", "!", "valid.example"} {
+		srv := startTestSSHServer(t)
+		cfg := revokedFixture(t, srv, hf)
+		d := NewSSH(cfg)
+		_, err := d.DialAgent(context.Background())
+		d.Close()
+		var re *knownhosts.RevokedError
+		if !errors.As(err, &re) {
+			t.Errorf("host field %q: want revoked error, got %v", hf, err)
+		}
+	}
+}
+
+func TestTrustRefusesSymlinkedParentDir(t *testing.T) {
+	key := newTestSigner(t).PublicKey()
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	os.Mkdir(real, 0o755)
+	link := filepath.Join(dir, "link")
+	os.Symlink(real, link)
+	if err := TrustHostKey(filepath.Join(link, "kh"), "h.example", 22, key, ssh.FingerprintSHA256(key)); err == nil {
+		t.Fatal("wrote through symlinked dir")
+	}
+	if st, _ := os.Stat(real); st.Mode().Perm() != 0o755 {
+		t.Fatalf("target dir chmodded: %v", st.Mode().Perm())
+	}
+}
