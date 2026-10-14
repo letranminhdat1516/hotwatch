@@ -4,7 +4,11 @@ package local
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
+
+	"hotwatch/model"
 )
 
 func TestRealMac(t *testing.T) {
@@ -19,5 +23,9 @@ func TestRealMac(t *testing.T) {
 		if err != nil || s.Memory.Total == 0 {
 			t.Fatalf("snapshot %+v err %v", s, err)
 		}
+	}
+	var ae *model.APIError
+	if err := l.Signal(ctx, 2147483000, time.Now(), model.SigTerm); !errors.As(err, &ae) || ae.Code != "not_found" {
+		t.Fatalf("missing pid: %v", err)
 	}
 }

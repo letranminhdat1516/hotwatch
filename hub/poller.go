@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -20,11 +21,14 @@ const (
 // host is one source's poller state. reset and force are guarded by Hub.mu;
 // everything below them is owned by the host's goroutine.
 type host struct {
-	id    string
-	src   source.Source
-	wake  chan struct{}
-	reset bool
-	force bool
+	id     string
+	src    source.Source
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{} // closed when the goroutine has exited
+	wake   chan struct{}
+	reset  bool
+	force  bool
 
 	conn     Conn
 	info     model.HostInfo
@@ -33,6 +37,8 @@ type host struct {
 	hist     *History
 	procs    []model.Process
 	ctrs     []model.Container
+	procsErr error
+	ctrsErr  error
 	hostKey  *transport.HostKeyError
 	polled   bool
 	lastPoll time.Time
@@ -90,40 +96,38 @@ func (h *Hub) due(p *host, t tier, force bool, now time.Time) (at time.Time, ok 
 }
 
 func (h *Hub) run(p *host) {
-	p.hist = NewHistory()
 	p.conn = Conn{State: Connecting}
 	h.emit(p)
-	for h.ctx.Err() == nil {
+	for p.ctx.Err() == nil {
 		h.mu.Lock()
 		reset, force := p.reset, p.force
 		p.reset, p.force = false, false
 		h.mu.Unlock()
 		if reset {
-			p.conn = p.conn.Next(EvReset, h.clk.Now())
+			p.conn = p.conn.Next(EvReset, time.Now())
 			p.hostKey = nil
 			p.polled = false
 			h.emit(p)
 		}
 		t, page := h.tierOf(p.id)
-		now := h.clk.Now()
+		now := time.Now()
 		at, ok := h.due(p, t, force, now)
 		if !ok {
 			select {
 			case <-p.wake:
-			case <-h.ctx.Done():
+			case <-p.ctx.Done():
 			}
 			continue
 		}
 		if wait := at.Sub(now); wait > 0 {
-			tm := h.clk.NewTimer(wait)
+			tm := time.NewTimer(wait)
 			select {
-			case <-tm.C():
+			case <-tm.C:
 			case <-p.wake:
-				// Tier or page changed (or a reset arrived): recompute. A forced
-				// poll requested meanwhile is picked up on the next pass.
+				// Tier or page changed (or a reset arrived): recompute.
 				tm.Stop()
 				continue
-			case <-h.ctx.Done():
+			case <-p.ctx.Done():
 				tm.Stop()
 				return
 			}
@@ -136,19 +140,20 @@ func (h *Hub) run(p *host) {
 // selected host. Failure of the first two feeds the connection state machine.
 func (h *Hub) poll(p *host, t tier, page string) {
 	p.polled = true
-	p.lastPoll = h.clk.Now()
+	p.lastPoll = time.Now()
 
-	if !p.haveInfo || p.conn.State == Connecting {
-		info, err := p.src.Info(h.ctx)
-		if h.ctx.Err() != nil {
+	// Info is (re)fetched on first contact and when coming back from Offline,
+	// so an agent upgraded meanwhile is caught before its snapshot is trusted.
+	if !p.haveInfo || p.conn.State == Connecting || p.conn.State == Offline {
+		info, err := p.src.Info(p.ctx)
+		if p.ctx.Err() != nil {
 			return
 		}
-		var inc *IncompatibleError
-		if err == nil || errors.As(err, &inc) {
+		if err == nil {
 			p.info, p.haveInfo = info, true
-		}
-		if err == nil && !model.Compatible(info.ProtocolVersion) {
-			err = &IncompatibleError{Version: info.ProtocolVersion}
+			if !model.Compatible(info.ProtocolVersion) {
+				err = &model.IncompatibleError{Version: info.ProtocolVersion}
+			}
 		}
 		if err != nil {
 			h.fail(p, err)
@@ -156,15 +161,15 @@ func (h *Hub) poll(p *host, t tier, page string) {
 		}
 	}
 
-	snap, err := p.src.Snapshot(h.ctx)
-	if h.ctx.Err() != nil {
+	snap, err := p.src.Snapshot(p.ctx)
+	if p.ctx.Err() != nil {
 		return
 	}
 	if err != nil {
 		h.fail(p, err)
 		return
 	}
-	now := h.clk.Now()
+	now := time.Now()
 	if snap.Time.IsZero() {
 		snap.Time = now
 	}
@@ -173,29 +178,40 @@ func (h *Hub) poll(p *host, t tier, page string) {
 	p.conn = p.conn.Next(EvOK, now)
 	p.hostKey = nil
 
-	if t == tierSelected {
-		// Page data is best effort: a failure keeps the previous list and
-		// never changes the connection state.
-		switch page {
-		case PageProcesses:
-			if v, err := p.src.Processes(h.ctx); err == nil {
-				p.procs = v
-			}
-		case PageDocker:
-			if v, err := p.src.Containers(h.ctx); err == nil {
-				p.ctrs = v
-			}
-		}
-		if h.ctx.Err() != nil {
+	// Publish the snapshot now; page data may be slow.
+	h.emit(p)
+
+	if t != tierSelected || (page != PageProcesses && page != PageDocker) {
+		return
+	}
+	// Page data is best effort: a failure keeps the previous list, is
+	// reported in the view, and never changes the connection state.
+	switch page {
+	case PageProcesses:
+		v, err := p.src.Processes(p.ctx)
+		if p.ctx.Err() != nil {
 			return
 		}
+		if err == nil {
+			p.procs = v
+		}
+		p.procsErr = err
+	case PageDocker:
+		v, err := p.src.Containers(p.ctx)
+		if p.ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			p.ctrs = v
+		}
+		p.ctrsErr = err
 	}
 	h.emit(p)
 }
 
 func (h *Hub) fail(p *host, err error) {
 	ev := Classify(err)
-	p.conn = p.conn.Next(ev, h.clk.Now())
+	p.conn = p.conn.Next(ev, time.Now())
 	switch ev {
 	case EvHostKeyUnknown, EvHostKeyMismatch:
 		var hk *transport.HostKeyError
@@ -207,12 +223,12 @@ func (h *Hub) fail(p *host, err error) {
 }
 
 func (h *Hub) emit(p *host) {
-	if h.ctx.Err() != nil {
+	if p.ctx.Err() != nil {
 		return
 	}
-	v := HostView{Info: p.info, Conn: p.conn, Snap: p.snap, Hist: p.hist, Procs: p.procs, Ctrs: p.ctrs, HostKey: p.hostKey}
+	v := HostView{Info: p.info, Conn: p.conn, Snap: p.snap, Hist: p.hist, Procs: p.procs, Ctrs: p.ctrs, ProcsErr: p.procsErr, CtrsErr: p.ctrsErr, HostKey: p.hostKey}
 	if !p.conn.LastOK.IsZero() {
-		v.Age = h.clk.Now().Sub(p.conn.LastOK)
+		v.Age = time.Now().Sub(p.conn.LastOK)
 	}
 	h.publish(p.id, v)
 }

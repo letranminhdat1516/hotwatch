@@ -3,6 +3,11 @@
 package local
 
 import (
+	"context"
+	"errors"
+	"time"
+
+	gproc "github.com/shirou/gopsutil/v4/process"
 	"os"
 	"runtime"
 	"syscall"
@@ -24,6 +29,20 @@ func New() *Local {
 		Hostname:  os.Hostname,
 		Arch:      runtime.GOARCH,
 		Kernel:    func() (string, error) { return unix.Sysctl("kern.osrelease") },
+		StartTime: func(ctx context.Context, pid int32) (time.Time, error) {
+			p, err := gproc.NewProcessWithContext(ctx, pid)
+			if err != nil {
+				if errors.Is(err, gproc.ErrorProcessNotRunning) {
+					return time.Time{}, ErrNoProcess
+				}
+				return time.Time{}, err
+			}
+			ct, err := p.CreateTimeWithContext(ctx)
+			if err != nil {
+				return time.Time{}, ErrNoProcess // exited, or not identifiable
+			}
+			return time.UnixMilli(ct), nil // same form as collect/darwin
+		},
 		Kill: func(pid int32, sig model.Signal) error {
 			s := syscall.SIGTERM
 			if sig == model.SigKill {

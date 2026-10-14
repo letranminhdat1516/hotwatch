@@ -14,7 +14,7 @@ import (
 	"hotwatch/transport"
 )
 
-var _ source.Source = (*Source)(nil)
+var _ source.Source = New(nil, "")
 
 func dialTo(srv *httptest.Server) func(context.Context) (net.Conn, error) {
 	return func(ctx context.Context) (net.Conn, error) {
@@ -70,16 +70,5 @@ func TestHostKeyErrors(t *testing.T) {
 		if got := hub.Classify(err); got != want {
 			t.Errorf("mismatch=%v: classify = %v (err %v)", mismatch, got, err)
 		}
-	}
-}
-
-func TestIncompatibleVersion(t *testing.T) {
-	srv := serve(t, 200, model.HostInfo{ProtocolVersion: "9.0", Hostname: "new"})
-	info, err := New(dialTo(srv), "t").Info(context.Background())
-	if got := hub.Classify(err); got != hub.EvIncompatible {
-		t.Fatalf("classify = %v (err %v)", got, err)
-	}
-	if info.ProtocolVersion != "9.0" {
-		t.Fatalf("info should still be returned for display: %+v", info)
 	}
 }

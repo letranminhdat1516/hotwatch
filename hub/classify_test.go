@@ -23,7 +23,7 @@ func TestClassify(t *testing.T) {
 		{"other api", &model.APIError{Code: "internal"}, EvFail},
 		{"unknown key", &transport.HostKeyError{Host: "h"}, EvHostKeyUnknown},
 		{"mismatch", fmt.Errorf("dial: %w", &transport.HostKeyError{Host: "h", Mismatch: true}), EvHostKeyMismatch},
-		{"incompatible", &IncompatibleError{Version: "2.0"}, EvIncompatible},
+		{"incompatible", &model.IncompatibleError{Version: "2.0"}, EvIncompatible},
 		{"plain", errors.New("boom"), EvFail},
 		{"canceled", context.Canceled, EvFail},
 	}

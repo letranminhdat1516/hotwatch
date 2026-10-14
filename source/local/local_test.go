@@ -26,6 +26,7 @@ type deps struct {
 	batErr  error
 	killed  []string
 	killErr error
+	starts  map[int32]time.Time
 }
 
 func (d *deps) build() *Local {
@@ -36,6 +37,12 @@ func (d *deps) build() *Local {
 		Hostname:  func() (string, error) { return "mac", nil },
 		Arch:      "arm64",
 		Kernel:    func() (string, error) { return "25.3.0", nil },
+		StartTime: func(_ context.Context, pid int32) (time.Time, error) {
+			if st, ok := d.starts[pid]; ok {
+				return st, nil
+			}
+			return time.Time{}, ErrNoProcess
+		},
 		Kill: func(pid int32, sig model.Signal) error {
 			d.killed = append(d.killed, string(sig))
 			return d.killErr
@@ -132,7 +139,8 @@ func TestDockerNotMonitored(t *testing.T) {
 func TestSignal(t *testing.T) {
 	start := time.Unix(1700000000, 0)
 	d := newDeps()
-	d.col.Procs = []model.Process{{PID: 100, StartTime: start}, {PID: 1, StartTime: start}, {PID: 4242, StartTime: start}}
+	d.starts = map[int32]time.Time{100: start, 1: start, 4242: start}
+	d.col.Err = errors.New("Signal must not list all processes")
 	l := d.build()
 	ctx := context.Background()
 	code := func(err error) string {
@@ -160,6 +168,7 @@ func TestSignal(t *testing.T) {
 	if len(d.killed) != 1 {
 		t.Fatalf("signalled despite refusal: %v", d.killed)
 	}
+
 	d.killErr = syscall.EPERM
 	if err := l.Signal(ctx, 100, start, model.SigTerm); code(err) != "forbidden" {
 		t.Fatalf("EPERM: %v", err)
@@ -195,7 +204,9 @@ func (o *overlapCollector) Processes(context.Context) ([]model.Process, error) {
 func TestCallsAreSerialized(t *testing.T) {
 	oc := &overlapCollector{}
 	l := NewWith(Deps{Collector: oc, Hostname: func() (string, error) { return "m", nil },
-		Kernel: func() (string, error) { return "k", nil }, Self: 1})
+		Kernel: func() (string, error) { return "k", nil }, Self: 1,
+		StartTime: func(context.Context, int32) (time.Time, error) { oc.enter(); return time.Time{}, nil },
+		Kill:      func(int32, model.Signal) error { return nil }})
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(2)

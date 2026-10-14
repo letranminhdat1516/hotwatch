@@ -24,6 +24,9 @@ type Deps struct {
 	Hostname  func() (string, error)
 	Arch      string
 	Kernel    func() (string, error)
+	// StartTime returns the start time of one process, in the same form the
+	// collector reports it; it must return ErrNoProcess when pid is not running.
+	StartTime func(ctx context.Context, pid int32) (time.Time, error)
 	Kill      func(pid int32, sig model.Signal) error
 	Self      int // the app's own pid; never signalled
 }
@@ -35,6 +38,9 @@ type Local struct {
 }
 
 var _ source.Source = (*Local)(nil)
+
+// ErrNoProcess is returned by Deps.StartTime for a pid that is not running.
+var ErrNoProcess = errors.New("no such process")
 
 // NewWith returns a Local over d.
 func NewWith(d Deps) *Local { return &Local{d: d} }
@@ -120,21 +126,15 @@ func (l *Local) Signal(ctx context.Context, pid int32, start time.Time, sig mode
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	procs, err := l.d.Collector.Processes(ctx)
-	if err != nil {
-		return err
-	}
-	var found *model.Process
-	for i := range procs {
-		if procs[i].PID == pid {
-			found = &procs[i]
-			break
-		}
-	}
-	if found == nil {
+	// Look up just this pid: a full process listing is slow and disturbs the
+	// collector's CPU baseline.
+	got, err := l.d.StartTime(ctx, pid)
+	switch {
+	case errors.Is(err, ErrNoProcess):
 		return &model.APIError{Code: "not_found", Message: "process is no longer running"}
-	}
-	if !found.StartTime.Equal(start) {
+	case err != nil:
+		return err
+	case !got.Equal(start):
 		return &model.APIError{Code: "conflict", Message: "pid now belongs to a different process"}
 	}
 	switch err := l.d.Kill(pid, sig); {

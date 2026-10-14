@@ -1,7 +1,10 @@
 // Package model holds the types shared by the app and the agent.
 package model
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // ProtocolVersion is the agent API version; only the major part gates compatibility.
 const ProtocolVersion = "1.0"
@@ -32,4 +35,11 @@ type Caps struct {
 	Apps      bool `json:"apps"`
 	Packages  bool `json:"packages"`
 	ReadOnly  bool `json:"readOnly"`
+}
+
+// IncompatibleError reports an agent whose protocol major version differs.
+type IncompatibleError struct{ Version string }
+
+func (e *IncompatibleError) Error() string {
+	return "agent protocol " + strconv.Quote(e.Version) + " is incompatible with " + strconv.Quote(ProtocolVersion)
 }
