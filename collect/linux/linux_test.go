@@ -13,6 +13,9 @@ import (
 func newAt(root string, t0 time.Time) *collector {
 	c := New(root).(*collector)
 	c.now = func() time.Time { return t0 }
+	c.statfs = fixtureStatfs(c)
+	c.ifaddrs = nil
+	c.pagesize = 4096
 	return c
 }
 
@@ -118,12 +121,5 @@ func TestMissingFiles(t *testing.T) {
 		if !slices.Contains(s.Partial, p) {
 			t.Errorf("partial %v missing %s", s.Partial, p)
 		}
-	}
-}
-
-func TestProcessesEmpty(t *testing.T) {
-	ps, err := newAt("testdata/t0", time.Unix(0, 0)).Processes(context.Background())
-	if err != nil || ps == nil || len(ps) != 0 {
-		t.Fatalf("%v %v", ps, err)
 	}
 }

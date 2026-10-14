@@ -4,6 +4,7 @@ package linux
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -18,11 +19,23 @@ type collector struct {
 	prevCPU  *cpuCounters // baseline for the next delta
 	lastCPU  model.CPU    // last good CPU percentages (Load excluded)
 	haveLast bool
+
+	// Injected so tests can run on any OS against fixtures.
+	statfs   statfsFunc
+	ifaddrs  func(name string) []string // nil: addresses left empty
+	pagesize int
+
+	prevDisk   map[string]diskCounters
+	prevDiskAt time.Time
+	prevNet    map[string]netCounters
+	prevNetAt  time.Time
+	procs      procState
 }
 
 // New returns a Collector reading /proc under root ("/" in production).
 func New(root string) collect.Collector {
-	return &collector{root: root, now: time.Now}
+	return &collector{root: root, now: time.Now,
+		statfs: realStatfs, ifaddrs: realIfaddrs, pagesize: os.Getpagesize()}
 }
 
 func (c *collector) proc(name string) string { return filepath.Join(c.root, "proc", name) }
@@ -60,11 +73,12 @@ func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
 	} else {
 		s.Uptime = up
 	}
+	if !c.sampleDisks(s.Time, &s.Disks) {
+		add("disks")
+	}
+	if !c.sampleNet(s.Time, &s.Net) {
+		add("net")
+	}
 	s.Partial = partial
 	return s, nil
-}
-
-// Processes is implemented by A2.
-func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
-	return []model.Process{}, ctx.Err()
 }

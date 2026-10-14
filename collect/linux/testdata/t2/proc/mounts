@@ -1,0 +1,11 @@
+sysfs /sys sysfs rw,nosuid 0 0
+proc /proc proc rw,nosuid 0 0
+devtmpfs /dev devtmpfs rw 0 0
+tmpfs /run tmpfs rw 0 0
+overlay /var/lib/docker/overlay2/x/merged overlay rw 0 0
+cgroup2 /sys/fs/cgroup cgroup2 rw 0 0
+/dev/loop0 /snap/core/1 squashfs ro 0 0
+nsfs /run/netns/x nsfs rw 0 0
+/dev/sda1 / ext4 rw,relatime 0 0
+/dev/sdb1 /data xfs rw,relatime 0 0
+/dev/sdb1 /data xfs rw,relatime 0 0
