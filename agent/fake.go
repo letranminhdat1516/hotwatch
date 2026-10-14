@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -23,7 +24,7 @@ type FakeSignaller struct {
 
 var _ Signaller = (*FakeSignaller)(nil)
 
-func (f *FakeSignaller) Signal(pid int32, start time.Time, s model.Signal) error {
+func (f *FakeSignaller) Signal(_ context.Context, pid int32, start time.Time, s model.Signal) error {
 	f.Mu.Lock()
 	defer f.Mu.Unlock()
 	f.calls = append(f.calls, SignalCall{pid, start, s})

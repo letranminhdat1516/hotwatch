@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"syscall"
 	"time"
@@ -46,13 +47,16 @@ func NewSystemSignaller(lookup func(ctx context.Context, pid int32) (model.Proce
 // check verifies pid exists and still has the start time the caller saw.
 // Start times are compared exactly: the collector and lookup derive them from
 // the same clock-tick formula, so equal processes yield equal values.
-func (s *signaller) check(pid int32, start time.Time) error {
-	p, ok, err := s.lookup(context.Background(), pid)
+func (s *signaller) check(ctx context.Context, pid int32, start time.Time) error {
+	p, ok, err := s.lookup(ctx, pid)
+	if errors.Is(err, syscall.ESRCH) || errors.Is(err, fs.ErrNotExist) {
+		return &model.APIError{Code: "not_found", Message: "process has exited"}
+	}
 	if err != nil {
 		return &model.APIError{Code: "internal", Message: "cannot read process: " + err.Error()}
 	}
 	if !ok {
-		return &model.APIError{Code: "not_found", Message: "no such process"}
+		return &model.APIError{Code: "not_found", Message: "process has exited"}
 	}
 	if !p.StartTime.Equal(start) {
 		return &model.APIError{Code: "conflict", Message: "process start time differs; the PID was reused"}
@@ -60,7 +64,7 @@ func (s *signaller) check(pid int32, start time.Time) error {
 	return nil
 }
 
-func (s *signaller) Signal(pid int32, start time.Time, sig model.Signal) error {
+func (s *signaller) Signal(ctx context.Context, pid int32, start time.Time, sig model.Signal) error {
 	if pid <= 1 || int(pid) == os.Getpid() || int(pid) == os.Getppid() {
 		return &model.APIError{Code: "forbidden", Message: "refusing to signal this process"}
 	}
@@ -73,7 +77,7 @@ func (s *signaller) Signal(pid int32, start time.Time, sig model.Signal) error {
 	default:
 		return &model.APIError{Code: "bad_request", Message: "signal must be TERM or KILL"}
 	}
-	if err := s.check(pid, start); err != nil {
+	if err := s.check(ctx, pid, start); err != nil {
 		return err
 	}
 	if s.pin != nil {
@@ -83,14 +87,16 @@ func (s *signaller) Signal(pid int32, start time.Time, sig model.Signal) error {
 			defer p.Close()
 			// Re-check after the handle exists: from here the handle refers
 			// to the process we verified.
-			if err := s.check(pid, start); err != nil {
+			if err := s.check(ctx, pid, start); err != nil {
 				return err
 			}
 			return mapSignalErr(p.Signal(sc))
-		case errors.Is(err, syscall.ESRCH):
+		case !errors.Is(err, syscall.ENOSYS):
+			// Fail closed: EMFILE, EINVAL (a thread id), seccomp EPERM...
+			// must not reopen the check/kill race.
 			return mapSignalErr(err)
 		}
-		// pidfd unsupported: fall through to kill.
+		// Kernel without pidfd_open: fall through to kill.
 	}
 	return mapSignalErr(s.kill(int(pid), sc))
 }

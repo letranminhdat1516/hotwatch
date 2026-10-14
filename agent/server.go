@@ -30,7 +30,7 @@ var containerID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 // Signaller delivers a signal to a process, refusing when the process start
 // time differs from start (PID reuse).
 type Signaller interface {
-	Signal(pid int32, start time.Time, s model.Signal) error
+	Signal(ctx context.Context, pid int32, start time.Time, s model.Signal) error
 }
 
 // Config configures the agent handler.
@@ -205,8 +205,9 @@ func (s *server) signal(w http.ResponseWriter, r *http.Request) {
 	if sw, ok := w.(*statusWriter); ok {
 		sw.signal = string(sig)
 	}
-	s.extendDeadline(w)
-	if err := s.sig.Signal(int32(pid), start, sig); err != nil {
+	ctx, cancel := s.detached(w, r)
+	defer cancel()
+	if err := s.sig.Signal(ctx, int32(pid), start, sig); err != nil {
 		writeErr(w, err)
 		return
 	}

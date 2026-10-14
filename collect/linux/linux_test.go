@@ -143,3 +143,14 @@ func TestProcessStart(t *testing.T) {
 		t.Fatalf("missing pid: ok=%v err=%v", ok, err)
 	}
 }
+
+func TestProcessStartRejectsThreadsAndZombies(t *testing.T) {
+	if _, ok, err := ProcessStart("testdata/thr", 10); !ok || err != nil {
+		t.Fatalf("leader: ok=%v err=%v", ok, err)
+	}
+	for _, pid := range []int32{11, 12} { // 11: non-leader thread of 10; 12: zombie
+		if _, ok, err := ProcessStart("testdata/thr", pid); ok || err != nil {
+			t.Fatalf("pid %d: ok=%v err=%v", pid, ok, err)
+		}
+	}
+}

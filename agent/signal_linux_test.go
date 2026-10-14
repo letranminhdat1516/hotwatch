@@ -37,7 +37,7 @@ func startSleeper(t *testing.T) (*exec.Cmd, chan error, time.Time) {
 func TestRealSignalKillsMatchingChild(t *testing.T) {
 	cmd, done, st := startSleeper(t)
 	s := NewSystemSignaller(realLookup)
-	if err := s.Signal(int32(cmd.Process.Pid), st, model.SigTerm); err != nil {
+	if err := s.Signal(bg, int32(cmd.Process.Pid), st, model.SigTerm); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -53,7 +53,7 @@ func TestRealSignalKillsMatchingChild(t *testing.T) {
 func TestRealSignalWrongStartLeavesChildAlive(t *testing.T) {
 	cmd, done, st := startSleeper(t)
 	s := NewSystemSignaller(realLookup)
-	err := s.Signal(int32(cmd.Process.Pid), st.Add(-time.Second), model.SigKill)
+	err := s.Signal(bg, int32(cmd.Process.Pid), st.Add(-time.Second), model.SigKill)
 	if errCode(err) != "conflict" {
 		t.Fatalf("err=%v", err)
 	}
@@ -75,9 +75,9 @@ func TestPidfdFallbackToKill(t *testing.T) {
 			return model.Process{PID: 4242, StartTime: start}, true, nil
 		},
 		kill: func(int, syscall.Signal) error { killed++; return nil },
-		pin:  func(int) (pinned, error) { return nil, syscall.ENOSYS },
+		pin:  func(int) (pinned, error) { return nil, syscall.ENOSYS }, // only ENOSYS falls back
 	}
-	if err := s.Signal(4242, start, model.SigTerm); err != nil || killed != 1 {
+	if err := s.Signal(bg, 4242, start, model.SigTerm); err != nil || killed != 1 {
 		t.Fatalf("err=%v killed=%d", err, killed)
 	}
 }

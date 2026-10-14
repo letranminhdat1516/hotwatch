@@ -206,11 +206,38 @@ func ProcessStart(root string, pid int32) (start time.Time, ok bool, err error) 
 	if !parsed {
 		return time.Time{}, false, errors.New("unparseable /proc/<pid>/stat")
 	}
+	if st.state == 'Z' || st.state == 'X' {
+		return time.Time{}, false, nil // exited; only the table entry remains
+	}
+	// /proc/<tid>/stat resolves for non-leader threads too; a thread id is
+	// not a process id.
+	sb, err := os.ReadFile(filepath.Join(root, "proc", strconv.Itoa(int(pid)), "status"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if tgid, found := parseTgid(sb); !found || tgid != pid {
+		return time.Time{}, false, nil
+	}
 	btime, err := readBtime(filepath.Join(root, "proc", "stat"))
 	if err != nil {
 		return time.Time{}, false, err
 	}
 	return startTime(btime, st.start), true, nil
+}
+
+func parseTgid(b []byte) (int32, bool) {
+	for len(b) > 0 {
+		var line []byte
+		line, b, _ = bytes.Cut(b, []byte{'\n'})
+		if v, ok := bytes.CutPrefix(line, []byte("Tgid:")); ok {
+			n, err := strconv.ParseInt(string(bytes.TrimSpace(v)), 10, 32)
+			return int32(n), err == nil
+		}
+	}
+	return 0, false
 }
 
 // readInto reads the whole (small) file into buf, returning the filled part.
@@ -229,6 +256,7 @@ func readInto(path string, buf []byte) ([]byte, error) {
 
 type statFields struct {
 	comm                string
+	state               byte
 	ppid, threads       int32
 	utime, stime, start uint64
 }
@@ -253,7 +281,7 @@ func parseStat(b []byte) (statFields, bool) {
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 		return statFields{}, false
 	}
-	return statFields{comm: string(b[l+1 : r]), ppid: int32(ppid), threads: int32(th),
+	return statFields{comm: string(b[l+1 : r]), state: f[0][0], ppid: int32(ppid), threads: int32(th),
 		utime: ut, stime: stm, start: start}, true
 }
 
