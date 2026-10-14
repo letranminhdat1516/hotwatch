@@ -21,6 +21,8 @@ type App struct {
 	actions  hub.Runner
 	onSelect func(hostID, page string)
 
+	panel HostPanel // nil: the placeholder list
+
 	selected string
 	page     string
 	views    map[string]hub.HostView
@@ -76,6 +78,15 @@ func copyView(v hub.HostView) hub.HostView {
 	return v
 }
 
+// HostPanel draws the right-hand host panel: selected is the host the pages
+// show and view returns any host's latest view.
+type HostPanel interface {
+	Render(c *ui.Context, selected string, view func(id string) hub.HostView)
+}
+
+// SetHostPanel replaces the placeholder host list with p.
+func (a *App) SetHostPanel(p HostPanel) { a.panel = p }
+
 func (a *App) host() (store.Host, bool) {
 	for _, h := range a.hosts {
 		if h.ID == a.selected {
@@ -106,7 +117,7 @@ func (a *App) selectHost(id string) {
 // View builds the window content.
 func (a *App) View(c *ui.Context) {
 	v := a.views[a.selected]
-	Shell(c, a, a.hostPanel, func() {
+	Shell(c, a, a.drawHostPanel, func() {
 		switch a.page {
 		case "overview":
 			pages.Overview(c, v, a.now())
@@ -116,9 +127,16 @@ func (a *App) View(c *ui.Context) {
 	})
 }
 
-// hostPanel is a placeholder list of the hosts until the grouped host
-// panel (E3) replaces it.
-func (a *App) hostPanel(c *ui.Context) {
+func (a *App) drawHostPanel(c *ui.Context) {
+	if a.panel != nil {
+		a.panel.Render(c, a.selected, func(id string) hub.HostView { return a.views[id] })
+		return
+	}
+	a.placeholderPanel(c)
+}
+
+// placeholderPanel is a flat list of the hosts, shown until SetHostPanel.
+func (a *App) placeholderPanel(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Padding(2*components.Grid, components.Grid).Gap(2).Children(func() {
 		ui.Text(c, "Hosts").FontSize(12).FontWeight(600).TextColor(t.TextMuted).Padding(0, components.Grid, components.Grid, components.Grid)

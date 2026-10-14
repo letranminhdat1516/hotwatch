@@ -151,3 +151,23 @@ func TestApplyCopiesAndReplaces(t *testing.T) {
 		t.Fatalf("Apply did not copy: %q", tt.Texts())
 	}
 }
+
+type stubPanel struct{ selected string }
+
+func (s *stubPanel) Render(c *ui.Context, selected string, view func(string) hub.HostView) {
+	s.selected = selected
+	ui.Text(c, "stub panel "+string(view(selected).Conn.State))
+}
+
+func TestHostPanelSlotReplacesPlaceholder(t *testing.T) {
+	app := testApp(hub.HostView{Conn: hub.Conn{State: hub.Online}})
+	p := &stubPanel{}
+	app.SetHostPanel(p)
+	tt := ui.NewTester(app.View, 1200, 800)
+	if p.selected != "h1" || !slices.Contains(tt.Texts(), "stub panel Online") {
+		t.Fatalf("selected %q texts %q", p.selected, tt.Texts())
+	}
+	if slices.Contains(tt.Texts(), "Hosts") {
+		t.Fatal("placeholder still shown")
+	}
+}
