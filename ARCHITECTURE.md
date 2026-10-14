@@ -47,7 +47,8 @@ Every Must is covered (see "Coverage" at the end). None is uncovered; the caveat
 | `mac/apps` | Installed apps (mygo `Shell.InstalledApps`), bundle size, architecture (Mach-O header), source detection, move to Trash | `model`, mygo |
 | `mac/pkgs` | Homebrew (`brew info --json=v2 --installed`, `brew outdated --json=v2`) and mise (`mise ls --json`, `mise outdated --json`) readers; task runner with streamed log | `model` |
 | `source` | `Source` interface; `source/local` (collectors in-process), `source/remote` (agent client) | `model`, `collect`, `agentclient` |
-| `agentclient` | HTTP client for the agent protocol: timeouts, size limits, strict JSON decode, log stream reader | `model` |
+| `transport` | Per-host dialer: `Direct` (TCP to Tailscale/LAN address) or `SSH` (golang.org/x/crypto/ssh client, ssh-agent via `SSH_AUTH_SOCK` or key file, strict `known_hosts` check; dials the agent's 127.0.0.1 port through the SSH connection; one SSH connection per host, reused) | `golang.org/x/crypto/ssh` |
+| `agentclient` | HTTP client for the agent protocol over a `transport` dialer: timeouts, size limits, strict JSON decode, log stream reader | `model`, `transport` |
 | `hub` | One `Poller` goroutine per host, `History` ring buffers, `ConnState` machine, `ActionRunner` (confirm → run → result) | `source`, `model` |
 | `store` | Host tree + settings in `~/Library/Application Support/Hotwatch/config.json` (atomic write, versioned); tokens in mygo `Secrets` (Keychain) | `model`, mygo |
 | `ui` | Window shell (TopBar, content, HostPanel), pages, shared components, theme tokens, i18n (en, vi) | mygo `ui`, `ui/chart`, `hub` |
@@ -77,7 +78,9 @@ Base layout (adapts the CLAUDE.md "UI" rules to native UI): one `ui.Shell` compo
 | `Online` | Last snapshot < 2 intervals old | stay | 1st failure → `Stale` | green dot |
 | `Stale` | 1–2 consecutive failures; last data kept with its age | → `Online` | 3rd failure → `Offline` | amber dot, "updated Ns ago" |
 | `Offline` | ≥ 3 failures; retry with backoff 2, 4, 8, 16, 30, 60 s (cap) | → `Online` | stay, next backoff | red dot, "offline · last seen …", Retry button |
-| `Unauthorized` | Agent answered 401 | — (no retry) | — | red, "token rejected — edit host" |
+| `Unauthorized` | Agent answered 401, or SSH authentication failed | — (no retry) | — | red, "token rejected" / "SSH login failed" — edit host |
+| `HostKeyUnknown` | SSH host key not in any known_hosts | → `Connecting` after the user accepts the shown SHA256 fingerprint | stay | amber, "verify host key" dialog |
+| `HostKeyMismatch` | SSH host key differs from known_hosts | — (no retry) | — | red, "host key changed — possible attack"; the user must remove the old key by hand |
 | `Incompatible` | Agent `ProtocolVersion` major differs | — (no retry) | — | red, "agent v… needs update" |
 
 Editing a host's address or token, or pressing Retry, moves any state to `Connecting`. The local host is always `Online`.
@@ -145,7 +148,10 @@ App-side persistent state (`config.json`, versioned, written atomically via temp
   "groups": [{"id": "g-servers", "name": "Servers", "parent": ""}],
   "hosts": [
     {"id": "local", "name": "This Mac", "kind": "local", "group": "g-local"},
-    {"id": "h-vps", "name": "VPS", "kind": "agent", "group": "g-servers", "address": "100.87.226.98", "port": 7171}
+    {"id": "h-vps", "name": "VPS", "kind": "agent", "group": "g-servers",
+     "conn": {"type": "ssh", "sshHost": "167.253.157.57", "sshPort": 22, "sshUser": "root", "keyPath": "", "agentPort": 7171}},
+    {"id": "h-box", "name": "agent-box", "kind": "agent", "group": "g-lab",
+     "conn": {"type": "direct", "address": "100.73.66.67", "agentPort": 7171}}
   ],
   "settings": {"intervalMs": 2000, "language": "vi", "columns": {"processes": ["name","pid","user","cpu","rss","threads"]}, "launchAtLogin": false},
   "ui": {"selectedHost": "h-vps", "page": "docker", "openGroups": ["g-servers"]}
@@ -154,7 +160,9 @@ App-side persistent state (`config.json`, versioned, written atomically via temp
 
 Tokens are not in this file: `Secrets` key `hotwatch/host/<id>` (macOS Keychain). In-memory only: `History` rings, current snapshots, process/container lists, action log.
 
-Agent config `/etc/hotwatch/agent.json` (mode 0600, owner `hotwatch`): `{"listen":"100.87.226.98:7171","tokenSHA256":"…","readOnly":false,"intervalMs":2000}`. The plain token is printed once by `hotwatch-agent init` and stored only in the Mac's Keychain.
+SSH host keys the user accepted in the app are stored in `~/Library/Application Support/Hotwatch/known_hosts` (`~/.ssh/known_hosts` is read but never written).
+
+Agent config `/etc/hotwatch/agent.json` (mode 0600, owner `hotwatch`): `{"listen":"127.0.0.1:7171","tokenSHA256":"…","readOnly":false,"intervalMs":2000}`. The plain token is printed once by `hotwatch-agent init` and stored only in the Mac's Keychain.
 
 ## Interfaces / contracts between parts
 
@@ -214,7 +222,8 @@ Test fakes (Phase 0, used by every track): `source.Fake` (scripted snapshots, er
 
 ## Security
 
-- **Network exposure**: agent binds only to the address in `listen`; `init` fills it with the host's Tailscale IPv4 (`tailscale ip -4`). It refuses `0.0.0.0`/public addresses unless `--allow-any-address` is passed. Acceptance check (R15): `curl` to the VPS public IP:7171 fails.
+- **Network exposure**: agent binds only to the address in `listen`. `hotwatch-agent init --mode tailscale` fills it with `tailscale ip -4`; `--mode ssh` (default when Tailscale is absent) uses `127.0.0.1`. Any other address (public, `0.0.0.0`) is refused; there is no override flag. Acceptance check (R15): `curl` to the VPS public IP:7171 fails.
+- **SSH transport**: host keys checked against `~/.ssh/known_hosts` and the app's own file; an unknown key requires the user to accept its SHA256 fingerprint; a changed key is a hard stop. Keys come from ssh-agent (`SSH_AUTH_SOCK`, which macOS sets for GUI apps) or a key file the user picks; passphrases are asked for, never stored. Only `direct-tcpip` channels to `127.0.0.1:<agentPort>` are opened: no remote commands, no shell.
 - **Authentication**: 32-byte random token (base64url) per host; agent stores only its SHA-256 and compares with `subtle.ConstantTimeCompare`. 5 failed auths per minute per source IP → 1-minute lockout (logged).
 - **Authorization**: `readOnly` rejects every `POST` with 403 `forbidden_read_only` before any work.
 - **Least privilege**: agent runs as system user `hotwatch`, member of `docker` (needed for R14; root-equivalent, accepted in Q3). systemd unit: `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ProtectHome=read-only`, `PrivateTmp=yes`, `AmbientCapabilities=CAP_KILL` (needed to terminate other users' processes, Q4), `CapabilityBoundingSet=CAP_KILL`.
@@ -242,13 +251,17 @@ Test fakes (Phase 0, used by every track): `source.Fake` (scripted snapshots, er
 - **A. App polls `GET /v1/snapshot` at the interval over a kept-alive HTTP connection; logs are the only stream (recommended).** Stateless, easy to test with httptest, failure detection is natural (a missed poll), agent sleeps when nobody asks.
 - **B. Agent pushes a long-lived stream (SSE/WebSocket) of snapshots.** Lower latency and fewer requests; needs reconnect logic, heartbeat and backpressure on both ends, and makes "offline" detection depend on heartbeats.
 
-### Choice 3: topology for remote hosts
-- **A. The Mac app talks to each agent directly over Tailscale (recommended).** No extra server; works for any host the Mac can reach; each host independent.
-- **B. A central collector on agent-box aggregates all agents and the app talks only to it.** Allows history while the Mac sleeps and one place for tokens; adds a service to run, a single point of failure, and a second hop for Docker actions.
+### Choice 3: topology and transport for remote hosts
+The app talks to each agent directly (no central server). Per host, the owner picks the transport: **direct** over Tailscale/LAN, or **SSH tunnel** for hosts with only a public IP (owner, B9). For SSH hosts:
+- **A. SSH tunnel to an agent on 127.0.0.1 (recommended).** No new public port, reuses the SSH access the owner already has, encryption and host authentication from SSH; costs one kept-open SSH connection per host and an `x/crypto/ssh` dependency.
+- **B. Agent listens on the public IP with TLS (self-signed, fingerprint pinned in the app).** No SSH dependency; but opens a scanned public port, needs certificate handling and firewall/rate-limit care.
+
+Rejected alternative for topology:
+- **Central collector on agent-box** aggregating all agents, the app talking only to it. Allows history while the Mac sleeps and one place for tokens; adds a service to run, a single point of failure, and a second hop for Docker actions.
 
 ### Other trade-offs taken
 - mygo native UI instead of a webview frontend (owner Q6): lower memory and instant start; we build our own cards/sparklines on `ui/chart` instead of using web chart libraries.
-- History in memory only (10 min): enough for the CPU page's 5-minute chart (R2); persistent history is "what's next" (would pair with Choice 3B).
+- History in memory only (10 min): enough for the CPU page's 5-minute chart (R2); persistent history is "what's next" (would pair with a central collector).
 - Polling rate tiering (selected host at full rate, others at 15 s) trades freshness of background hosts for R17.
 
 ### What's next (not in v1)
@@ -264,7 +277,7 @@ Persistent history and alerts (needs a central collector), remote Apps/Packages 
 | R4 Disk | `collect/*` volumes + I/O (caveat: other users' processes on Mac) |
 | R5 Network | `collect/*` interfaces + listening ports (same caveat) |
 | R8 Processes | `Collector.Processes`, `ui/pages/processes` (`ui.Table` columns/resize/reorder, tree via `ui.Outline`), `ActionRunner` |
-| R11 Hosts | `store`, `ui/hostpanel`, `hub` ConnState |
+| R11 Hosts | `store`, `transport` (direct / SSH), `ui/hostpanel`, `hub` ConnState incl. host-key states |
 | R12 Agent | `agent`, `collect/linux`, `gpu/nvidia`, `docker`, systemd unit + install script |
 | R13 Remote processes | `source/remote` + `POST /v1/processes/{pid}/signal` with start-time guard |
 | R14 Docker | `docker` client, `/v1/containers*`, `ui/pages/docker` with logs pane |
