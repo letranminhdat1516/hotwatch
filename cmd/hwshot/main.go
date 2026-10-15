@@ -66,8 +66,9 @@ func macSnap() *model.Snapshot {
 		Disks: []model.Volume{{Mount: "/", FS: "apfs", Total: 494 << 30, Used: 480 << 30, ReadBps: fp(573 << 10), WriteBps: fp(33 << 20)}},
 		Net:   []model.Interface{{Name: "en0", Addrs: []string{"192.168.1.20"}, Up: true, RxBps: fp(27 << 10), TxBps: fp(15 << 10)}},
 		GPUs:  []model.GPU{{Name: "Apple M5", UtilPct: fp(57), MemUsed: up(814 << 20), MemTotal: up(24 << 30)}},
-		Battery: &model.Battery{ChargePct: 98, OnAC: false, PowerW: fp(10.2),
-			TimeRemaining: dur(7*time.Hour + 52*time.Minute)},
+		Battery: &model.Battery{ChargePct: 98, OnAC: false, PowerW: fp(10.2), TempC: fp(33), ThermalState: "nominal",
+			TimeRemaining: dur(7*time.Hour + 52*time.Minute),
+			Assertions:    []model.Assertion{{PID: 412, Process: "caffeinate", Type: "PreventUserIdleSystemSleep", Reason: "Running a build"}}},
 		Uptime: 28*24*time.Hour + 4*time.Hour,
 	}
 }

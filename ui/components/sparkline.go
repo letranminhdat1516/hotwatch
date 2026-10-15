@@ -26,7 +26,36 @@ const (
 // scales to the window's largest bucket with headroom. Unknown values
 // (NaN, Inf) are ignored.
 func Sparkline(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color) ui.Element {
-	box := ui.Box(c).Height(chartH).Radius(chartRadius).Background(tint.Alpha(0.10))
+	return dotMatrix(c, pts, from, to, ceiling, tint, chartH)
+}
+
+// DotChart is a taller dot matrix with a time axis under it, for a page's
+// main chart.
+func DotChart(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
+	t := c.Theme()
+	return ui.Column(c).Gap(Grid / 2).Children(func() {
+		dotMatrix(c, pts, from, to, ceiling, tint, height)
+		ui.Box(c).Height(16).Draw(func(p *ui.Painter, r ui.Rect) {
+			ticks := xTicksFor(to.Sub(from))
+			x0, w := r.X+chartPad, r.W-2*chartPad
+			for i, tk := range ticks {
+				tw, _ := p.MeasureText(0, ui.Span{Text: tk.Label, Size: 11})
+				x := x0 + w*tk.At - tw/2
+				switch i {
+				case 0:
+					x = x0
+				case len(ticks) - 1:
+					x = x0 + w - tw
+				}
+				p.Text(x, r.Y, tk.Label, 11, t.TextMuted)
+			}
+		})
+	})
+}
+
+// dotMatrix draws the dot matrix on its tinted backdrop at height.
+func dotMatrix(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
+	box := ui.Box(c).Height(height).Radius(chartRadius).Background(tint.Alpha(0.10))
 	if len(pts) == 0 || !to.After(from) {
 		return box
 	}
@@ -37,12 +66,14 @@ func Sparkline(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float
 		if cols < 1 {
 			return
 		}
-		lit := dotColumns(pts, from, to, cols, dotRows, ceiling)
+		// Taller charts get more rows, so the dot pitch stays the same both ways.
+		rows := max(dotRows, int(inner.H/dotPitch))
+		lit := dotColumns(pts, from, to, cols, rows, ceiling)
 		pitchX := inner.W / float32(cols)
-		pitchY := inner.H / float32(dotRows)
+		pitchY := inner.H / float32(rows)
 		for j, n := range lit {
 			cx := inner.X + (float32(j)+0.5)*pitchX
-			for row := 0; row < dotRows; row++ {
+			for row := 0; row < rows; row++ {
 				cy := inner.Y + inner.H - (float32(row)+0.5)*pitchY
 				col := off
 				if row < n {

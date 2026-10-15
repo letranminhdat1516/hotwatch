@@ -125,6 +125,9 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 	}
 	if s.Battery != nil {
 		h.add("battery", t, s.Battery.ChargePct)
+		if s.Battery.PowerW != nil {
+			h.add("power", t, *s.Battery.PowerW)
+		}
 	}
 }
 

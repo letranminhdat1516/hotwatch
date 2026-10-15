@@ -85,8 +85,9 @@ func energySnap(b *model.Battery) *model.Snapshot {
 
 func TestEnergyShowsChargePowerThermalAndAssertions(t *testing.T) {
 	tt := render(pages.Energy, view(energySnap(battery()), nil, "darwin"))
-	has(t, tt, "87.0 %", "Charging", "Time remaining", "1h 15m", "Battery power", "12.5 W",
-		"Battery temperature", "31.0 °C", "Thermal state", "Nominal",
+	has(t, tt, "87.0 %", "Charging", "Remaining", "1h 15m", "Battery Flow", "12.5 W", "charging",
+		"Adapter", "Connected", "Temperature", "31.0 °C", "Thermal", "Nominal", "Awake", "1 assertion",
+		"Power", "The battery charges at", "Average", "Peak", "Temperatures",
 		"Keeping the Mac awake", "caffeinate", "412", "PreventUserIdleSystemSleep", "Running a build")
 	lacks(t, tt, "—", "On battery", "On AC", "Nothing is preventing sleep")
 }
@@ -137,8 +138,9 @@ func TestEnergyThermalBadges(t *testing.T) {
 func TestEnergyUnknownValuesAreDashes(t *testing.T) {
 	b := &model.Battery{ChargePct: 55}
 	tt := render(pages.Energy, view(energySnap(b), nil, "darwin"))
-	has(t, tt, "55.0 %", "On battery", "Time remaining", "Battery power", "Battery temperature", "Thermal state", "—", "Nothing is preventing sleep")
-	lacks(t, tt, "0.0 W", "0.0 °C")
+	has(t, tt, "55.0 %", "On battery", "Remaining", "Battery Flow", "Adapter", "None", "Temperature", "Thermal", "—", "Nothing is preventing sleep")
+	// No power figure: no Power card, no Temperatures card.
+	lacks(t, tt, "0.0 W", "0.0 °C", "Average", "Peak", "Temperatures")
 }
 
 func TestEnergyNoBattery(t *testing.T) {

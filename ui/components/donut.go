@@ -65,3 +65,28 @@ func SegLegend(c *ui.Context, segs []Segment) ui.Element {
 		}
 	})
 }
+
+// Ring is a single-value progress ring: frac (0–1) of the circle in color
+// over a faint track of the same colour, with big and small centred inside
+// as real text (so they read and test like any label).
+func Ring(c *ui.Context, frac float64, size float32, color ui.Color, big, small string) ui.Element {
+	t := c.Theme()
+	frac = min(max(frac, 0), 1)
+	return ui.Column(c).Size(size, size).Shrink(0).Center().Gap(2).Draw(func(p *ui.Painter, r ui.Rect) {
+		cx, cy := r.X+r.W/2, r.Y+r.H/2
+		outer := min(r.W, r.H) / 2
+		inner := outer * 0.8
+		parts := chart.Pie([]float64{frac, 1 - frac}, 0)
+		if frac < 1 {
+			p.FillPath(chart.Sector(cx, cy, inner, outer, parts[1]), color.Alpha(0.15))
+		}
+		if frac > 0 {
+			p.FillPath(chart.Sector(cx, cy, inner, outer, parts[0]), color)
+		}
+	}).Children(func() {
+		ui.Text(c, big).FontSize(22).FontWeight(700).TextColor(t.Text).SingleLine()
+		if small != "" {
+			ui.Text(c, small).FontSize(11).TextColor(t.TextMuted).SingleLine()
+		}
+	})
+}

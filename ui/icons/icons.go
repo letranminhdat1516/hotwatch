@@ -40,4 +40,6 @@ var (
 	ChevronRight = load("chevron-right")
 	Pause        = load("pause")
 	Play         = load("play")
+	Battery      = load("battery")
+	Thermometer  = load("thermometer")
 )
