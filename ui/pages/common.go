@@ -143,3 +143,11 @@ func waiting(c *ui.Context, v hub.HostView) bool {
 	components.EmptyState(c, "Waiting for data…")
 	return true
 }
+
+// plural counts noun: "1 core", "10 logical processors".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}

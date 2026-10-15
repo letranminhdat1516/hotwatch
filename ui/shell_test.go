@@ -199,3 +199,15 @@ func TestShellNarrowWindowKeepsEveryPageReachable(t *testing.T) {
 		t.Fatalf("Packages not open: %q", tt.Texts())
 	}
 }
+
+func TestCPUSubtitleNamesTheChipAndCoreKinds(t *testing.T) {
+	v := hub.HostView{Info: model.HostInfo{Machine: model.Machine{Chip: "Apple M5", PerfCores: 4, EffCores: 6}},
+		Snap: &model.Snapshot{CPU: model.CPU{PerCore: make([]float64, 10)}}}
+	if got := hwui.PageSubtitle("cpu", v); got != "Apple M5 · 4 Performance + 6 Efficiency cores" {
+		t.Fatalf("subtitle %q", got)
+	}
+	v.Info.Machine = model.Machine{}
+	if got := hwui.PageSubtitle("cpu", v); got != "10 cores" {
+		t.Fatalf("without the split: %q", got)
+	}
+}

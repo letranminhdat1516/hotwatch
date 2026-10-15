@@ -64,7 +64,8 @@ func gpuVal(s model.Snapshot) float64 {
 func macSnap() *model.Snapshot {
 	return &model.Snapshot{
 		Time: time.Now(),
-		CPU:  model.CPU{Total: 32, PerCore: make([]float64, 10), Load: [3]float64{2.1, 1.8, 1.5}, User: fp(25), System: fp(7)},
+		CPU: model.CPU{Total: 32, PerCore: []float64{66, 34, 22, 15, 12, 6, 14, 6.9, 5, 2}, Load: [3]float64{7.08, 9.92, 12.3},
+			User: fp(25), System: fp(7), TempC: fp(54), TempMaxC: fp(60)},
 		Memory: model.Memory{Total: 24 << 30, Used: 19 << 30, App: 8 << 30, Wired: 3<<30 + 800<<20,
 			Compressed: 7 << 30, SwapTotal: 4 << 30, SwapUsed: 1 << 30, Pressure: "normal"},
 		Disks: []model.Volume{{Mount: "/", FS: "apfs", Total: 494 << 30, Used: 480 << 30, ReadBps: fp(573 << 10), WriteBps: fp(33 << 20)}},

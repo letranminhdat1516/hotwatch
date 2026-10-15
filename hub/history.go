@@ -93,6 +93,10 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.add("cpu", t, s.CPU.Total)
+	if s.CPU.User != nil && s.CPU.System != nil { // the split, for stacked charts
+		h.add("cpu.user", t, *s.CPU.User)
+		h.add("cpu.system", t, *s.CPU.System)
+	}
 	if s.Memory.Total > 0 {
 		h.add("mem", t, float64(s.Memory.Used)/float64(s.Memory.Total)*100)
 	}

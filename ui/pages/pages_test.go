@@ -98,27 +98,75 @@ func lacks(t *testing.T, tt *ui.Tester, bad ...string) {
 	}
 }
 
-func TestCPUShowsOneBarPerCore(t *testing.T) {
-	tt := render(pages.CPU, view(snap(), procs(), "darwin"))
-	for i := 1; i <= 16; i++ {
-		has(t, tt, fmt.Sprintf("Core %d", i))
+// macCPU is a 10-core Apple M5 sample: six efficiency cores first (cpu0–5),
+// then four performance cores, as the kernel numbers them.
+func macCPU() hub.HostView {
+	s := snap()
+	s.CPU = model.CPU{Total: 18.2, User: fp(9.5), System: fp(8.7), TempC: fp(54), TempMaxC: fp(60),
+		PerCore: []float64{66, 34, 22, 15, 12, 6, 14, 6.9, 5, 2}, Load: [3]float64{7.08, 9.92, 12.3}}
+	s.Uptime = 28*24*time.Hour + 9*time.Hour
+	s.Battery = &model.Battery{ThermalState: "nominal"}
+	v := view(s, procs(), "darwin")
+	v.Info.Machine = model.Machine{Chip: "Apple M5", PerfCores: 4, EffCores: 6}
+	v.Procs[0].Threads, v.Procs[1].Threads, v.Procs[3].Threads = 4000, 600, 74
+	return v
+}
+
+func TestCPUPageProcessorLoad(t *testing.T) {
+	tt := render(pages.CPU, macCPU())
+	has(t, tt, "Processor Load", "Now", "18.2 %", "User", "9.5%", "System", "8.7%",
+		"Temperature", "54 °C", "hottest 60 °C", "Average", "Peak", "now")
+}
+
+func TestCPUPageGroupsPerformanceAndEfficiencyCores(t *testing.T) {
+	tt := render(pages.CPU, macCPU())
+	has(t, tt, "Cores", "10 logical processors", "Performance Cores", "Efficiency Cores", "Core 1", "66%", "Core 7", "14%", "Core 10", "2.0%")
+	texts := tt.Texts()
+	perf, eff, c7, c1 := slices.Index(texts, "Performance Cores"), slices.Index(texts, "Efficiency Cores"), slices.Index(texts, "Core 7"), slices.Index(texts, "Core 1")
+	if !(perf < c7 && c7 < eff && eff < c1) {
+		t.Fatalf("cores 7–10 must be under Performance and 1–6 under Efficiency: %q", texts)
 	}
-	lacks(t, tt, "Core 17", "Core 0")
-	has(t, tt, "CPU", "%", "Load 1.50 / 1.20 / 0.90", "Top processes by CPU", "python3", "55.0 %")
+	lacks(t, tt, "Core 0", "Core 11")
+}
+
+func TestCPUPageActivity(t *testing.T) {
+	tt := render(pages.CPU, macCPU())
+	has(t, tt, "Activity", "Load, last minute", "7.08 · Busy", "Load, 5 minutes", "9.92", "Load, 15 minutes", "12.3",
+		"Trend", "Falling", "Processes", "4", "Threads", "4,674", "Uptime", "28d 9h", "Thermal")
+}
+
+func TestCPUPageTopProcessesAndShowAll(t *testing.T) {
+	var went []string
+	pages.SetNavigate(func(p string) { went = append(went, p) })
+	defer pages.SetNavigate(nil)
+	tt := render(pages.CPU, macCPU())
+	has(t, tt, "Using the Most CPU", "python3", "55%", "postgres", "12%", "Show All")
+	if err := tt.Click("Show All"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(went, []string{"processes"}) {
+		t.Fatalf("navigated %v", went)
+	}
+}
+
+func TestCPUPageOnALinuxHost(t *testing.T) {
+	tt := render(pages.CPU, view(snap(), procs(), "linux"))
+	has(t, tt, "Processor Load", "41.2 %", "Cores", "16 logical processors", "Core 1", "Core 16", "Load, last minute", "1.50 · Quiet")
+	lacks(t, tt, "Performance Cores", "Efficiency Cores", "Temperature", "Core 17", "Thermal")
 }
 
 func TestCPUWithoutProcessesPointsToProcessesPage(t *testing.T) {
 	tt := render(pages.CPU, view(snap(), nil, "linux"))
 	has(t, tt, "Process details are on the Processes page")
-	lacks(t, tt, "Top processes by CPU")
+	lacks(t, tt, "Using the Most CPU")
 }
 
 func TestCPUPartialIsUnknownNotZero(t *testing.T) {
 	s := snap()
 	s.Partial = []string{"cpu"}
 	tt := render(pages.CPU, view(s, nil, "linux"))
-	has(t, tt, "Load —")
-	lacks(t, tt, "Core 1")
+	has(t, tt, "Load, last minute", "—")
+	lacks(t, tt, "Core 1", "41.2 %")
 }
 
 func TestPagesWaitForData(t *testing.T) {

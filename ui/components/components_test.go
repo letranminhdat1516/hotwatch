@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"hotwatch/hub"
+	hwui "hotwatch/ui"
 	"hotwatch/ui/components"
 )
 
@@ -168,3 +169,31 @@ func TestStackedBarLegend(t *testing.T) {
 	}
 }
 
+func TestStackedDotChartPaintsEachLayerInItsColour(t *testing.T) {
+	user, system := ui.Hex("#3b82f6"), ui.Hex("#ef4444")
+	total := []hub.Point{{T: now, V: 100}}
+	sys := []hub.Point{{T: now, V: 50}}
+	var box ui.Rect
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(hwui.Theme(true))
+		ui.Column(c).Width(400).Children(func() {
+			box = components.StackedDotChart(c, []components.DotLayer{{Pts: sys, Color: system}, {Pts: total, Color: user}},
+				now.Add(-time.Minute), now, 100, user, 120).Bounds()
+		})
+	}, 420, 200)
+	tt.Frame()
+	img := tt.Image()
+	// The last column: the bottom half is System, the top half User.
+	x := int(box.X + box.W - 10 - 3)
+	at := func(y float32) ui.Color {
+		r, g, b, _ := img.At(x, int(y)).RGBA()
+		return ui.RGB(uint8(r>>8), uint8(g>>8), uint8(b>>8))
+	}
+	bottom, top := box.Y+120-10-3, box.Y+10+3
+	if at(bottom) != system || at(top) != user {
+		t.Fatalf("bottom %v (want system %v), top %v (want user %v)", at(bottom), system, at(top), user)
+	}
+	if !slices.Contains(tt.Texts(), "now") {
+		t.Fatalf("no time axis: %q", tt.Texts())
+	}
+}

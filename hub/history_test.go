@@ -138,3 +138,17 @@ func TestHistoryDisksCountedOncePerDevice(t *testing.T) {
 		t.Fatalf("disk.write = %+v, want 1", p)
 	}
 }
+
+func TestHistoryKeepsUserAndSystemCPU(t *testing.T) {
+	h := NewHistory()
+	t0 := time.Unix(1000, 0)
+	u, s := 25.0, 7.0
+	h.Push(t0, model.Snapshot{CPU: model.CPU{Total: 32, User: &u, System: &s}})
+	h.Push(t0.Add(2*time.Second), model.Snapshot{CPU: model.CPU{Total: 40}}) // an agent without the split
+	if got := h.Series("cpu.user"); len(got) != 1 || got[0].V != 25 {
+		t.Fatalf("cpu.user %+v", got)
+	}
+	if got := h.Series("cpu.system"); len(got) != 1 || got[0].V != 7 {
+		t.Fatalf("cpu.system %+v", got)
+	}
+}

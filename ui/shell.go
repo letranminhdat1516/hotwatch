@@ -110,8 +110,8 @@ func Shell(c *ui.Context, a *App, content func()) {
 		a.sidebar(c, v, now)
 		ui.Column(c).Grow(1).Background(t.Background).Children(func() {
 			ui.Scroll(c).Fill().Children(func() {
-				ui.Column(c).Padding(3*components.Grid).Gap(2*components.Grid).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Gap(2*components.Grid).Children(func() {
+				ui.Column(c).Padding(3 * components.Grid).Gap(2 * components.Grid).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(2 * components.Grid).Children(func() {
 						ui.Column(c).Grow(1).Gap(2).Children(func() {
 							ui.Text(c, title).FontSize(22).FontWeight(700)
 							if sub := pageSubtitle(a.page, v); sub != "" {
@@ -163,7 +163,7 @@ func (a *App) sidebar(c *ui.Context, v hub.HostView, now time.Time) {
 		bar := c.TitleBar()
 		ui.Row(c).Height(max(bar.Height, 28)).Padding(0, bar.Right, 0, bar.Left).DragWindow()
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Padding(components.Grid/2, components.Grid).Gap(components.Grid/2).Children(func() {
+			ui.Column(c).Padding(components.Grid/2, components.Grid).Gap(components.Grid / 2).Children(func() {
 				for gi, g := range groups {
 					rows := make([]Page, 0, len(g.pages))
 					for _, p := range g.pages {
@@ -426,6 +426,14 @@ func pageSubtitle(page string, v hub.HostView) string {
 			return sub
 		}
 	case "cpu":
+		m := v.Info.Machine
+		if m.PerfCores > 0 && m.EffCores > 0 {
+			sub := fmt.Sprintf("%d Performance + %d Efficiency cores", m.PerfCores, m.EffCores)
+			if m.Chip != "" {
+				sub = m.Chip + " · " + sub
+			}
+			return sub
+		}
 		if s != nil && len(s.CPU.PerCore) > 0 {
 			return plural(len(s.CPU.PerCore), "core")
 		}

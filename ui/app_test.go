@@ -161,4 +161,3 @@ func TestApplyCopiesAndReplaces(t *testing.T) {
 		t.Fatalf("Apply did not copy: %q", tt.Texts())
 	}
 }
-

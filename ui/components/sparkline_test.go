@@ -12,11 +12,11 @@ func TestDotColumnsBucketsAverageAndScale(t *testing.T) {
 	from := time.Unix(0, 0)
 	to := from.Add(40 * time.Second) // four 10 s buckets
 	pts := []hub.Point{
-		{T: from.Add(1 * time.Second), V: 100},        // bucket 0 with the next: avg 50 -> 4 of 8
-		{T: from.Add(9 * time.Second), V: 0},          //
-		{T: from.Add(15 * time.Second), V: 25},        // bucket 1: 25 -> 2
+		{T: from.Add(1 * time.Second), V: 100},         // bucket 0 with the next: avg 50 -> 4 of 8
+		{T: from.Add(9 * time.Second), V: 0},           //
+		{T: from.Add(15 * time.Second), V: 25},         // bucket 1: 25 -> 2
 		{T: from.Add(35 * time.Second), V: math.NaN()}, // unknown: bucket 3 stays off
-		{T: from.Add(50 * time.Second), V: 100},       // after the window: ignored
+		{T: from.Add(50 * time.Second), V: 100},        // after the window: ignored
 	}
 	got := dotColumns(pts, from, to, 4, 8, 100)
 	want := []int{4, 2, 0, 0}

@@ -73,6 +73,7 @@ func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.
 	a := &App{hosts: slices.Clone(hosts), actions: actions, onSelect: onSelect, page: "overview",
 		views: map[string]hub.HostView{}, held: map[string]hub.HostView{}, now: time.Now, windowIdx: 1,
 		acts: pages.NewActions(actions), procs: pages.NewProcesses(), docker: pages.NewDocker(), apps: pages.NewApps(nil, nil), pkgs: pages.NewPackages(nil, nil)}
+	pages.SetNavigate(a.ShowPage) // page links ("Show All") open their page
 	a.procs.OnColumns = func(cols []string) {
 		if a.onColumns != nil {
 			a.onColumns("processes", cols)

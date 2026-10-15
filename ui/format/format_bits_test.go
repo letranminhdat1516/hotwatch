@@ -13,12 +13,12 @@ func TestRateInBits(t *testing.T) {
 		t.Fatal("BitRates not on")
 	}
 	cases := map[float64]string{
-		1024:     "8.2 kb/s",   // 8192 b/s, decimal units
-		125000:   "1.0 Mb/s",   // one megabit per second
-		12.5e6:   "100.0 Mb/s", //
-		30:       "240 b/s",    // under a kilobit: whole bits
-		1.25e9:   "10.0 Gb/s",  //
-		-1:       Unknown,      // negative rates are unknown
+		1024:   "8.2 kb/s",   // 8192 b/s, decimal units
+		125000: "1.0 Mb/s",   // one megabit per second
+		12.5e6: "100.0 Mb/s", //
+		30:     "240 b/s",    // under a kilobit: whole bits
+		1.25e9: "10.0 Gb/s",  //
+		-1:     Unknown,      // negative rates are unknown
 	}
 	for in, want := range cases {
 		in := in

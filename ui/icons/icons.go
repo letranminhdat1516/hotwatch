@@ -36,7 +36,7 @@ var (
 	Offline   = load("wifi-off")
 	Warning   = load("triangle-alert")
 
-	ChevronDown = load("chevron-down")
+	ChevronDown  = load("chevron-down")
 	ChevronRight = load("chevron-right")
 	Pause        = load("pause")
 	Play         = load("play")
@@ -44,4 +44,5 @@ var (
 	Thermometer  = load("thermometer")
 	Info         = load("info")
 	Laptop       = load("laptop")
+	Activity     = load("activity")
 )

@@ -308,10 +308,7 @@ func (p *Apps) footer(c *ui.Context) {
 			sized++
 		}
 	}
-	s := fmt.Sprintf("%d apps", len(p.apps))
-	if len(p.apps) == 1 {
-		s = "1 app"
-	}
+	s := plural(len(p.apps), "app")
 	if sized == len(p.apps) && sized > 0 {
 		s += " · " + format.Bytes(total)
 	}

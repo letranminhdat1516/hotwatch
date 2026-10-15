@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hotwatch/collect"
+	"hotwatch/mac/sensors"
 	"hotwatch/model"
 )
 
@@ -62,6 +63,13 @@ func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
 		add("cpu")
 	} else {
 		s.CPU.Load = load
+	}
+	// Temperatures are optional: a Mac without readable die sensors (Intel)
+	// leaves them nil and the section complete.
+	if r, err := sensors.Read(); err == nil {
+		if avg, hot, ok := sensors.CPU(r); ok {
+			s.CPU.TempC, s.CPU.TempMaxC = &avg, &hot
+		}
 	}
 	if mem, err := readMemory(ctx); err != nil {
 		add("memory")

@@ -26,6 +26,10 @@ type CPU struct {
 	// them (agents older than this field).
 	User   *float64 `json:"user,omitempty"`
 	System *float64 `json:"system,omitempty"`
+	// TempC is the mean of the CPU die sensors and TempMaxC the hottest, in
+	// °C; nil where the host has no readable sensors.
+	TempC    *float64 `json:"tempC,omitempty"`
+	TempMaxC *float64 `json:"tempMaxC,omitempty"`
 }
 
 type Memory struct {

@@ -54,10 +54,38 @@ func timeAxis(c *ui.Context, window time.Duration) ui.Element {
 	})
 }
 
+// DotLayer is one series of a StackedDotChart and the colour of its dots.
+type DotLayer struct {
+	Pts   []hub.Point
+	Color ui.Color
+}
+
+// StackedDotChart draws layers on one scale, front first: each lights its
+// dots from the bottom in its colour, and a later layer shows where it
+// rises above the earlier ones. For a split such as CPU time, pass the
+// lower part first and the total second (System, then User + System). The
+// backdrop is tinted with tint; a time axis follows.
+func StackedDotChart(c *ui.Context, layers []DotLayer, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
+	pts := make([][]hub.Point, len(layers))
+	colors := make([]ui.Color, len(layers))
+	for i, l := range layers {
+		pts[i], colors[i] = l.Pts, l.Color
+	}
+	return ui.Column(c).Gap(Grid / 2).Children(func() {
+		dotMatrixColored(c, pts, colors, from, to, ceiling, tint, height)
+		timeAxis(c, to.Sub(from))
+	})
+}
+
 // dotMatrix draws layers on a tinted backdrop at height: the first layer in
 // tint, the second in a lighter tint behind it (it shows where it rises
 // above the first), all on one scale.
 func dotMatrix(c *ui.Context, layers [][]hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
+	return dotMatrixColored(c, layers, []ui.Color{tint, tint.Alpha(0.45)}, from, to, ceiling, tint, height)
+}
+
+// dotMatrixColored draws layers in colors (the last colour repeats).
+func dotMatrixColored(c *ui.Context, layers [][]hub.Point, colors []ui.Color, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
 	box := ui.Box(c).Height(height).Radius(chartRadius).Background(tint.Alpha(0.10))
 	empty := true
 	for _, l := range layers {
@@ -67,7 +95,6 @@ func dotMatrix(c *ui.Context, layers [][]hub.Point, from, to time.Time, ceiling 
 		return box
 	}
 	off := tint.Alpha(0.18)
-	colors := []ui.Color{tint, tint.Alpha(0.45)}
 	return box.Draw(func(p *ui.Painter, r ui.Rect) {
 		inner := ui.Rect{X: r.X + chartPad, Y: r.Y + chartPad, W: r.W - 2*chartPad, H: r.H - 2*chartPad}
 		cols := int(inner.W / dotPitch)

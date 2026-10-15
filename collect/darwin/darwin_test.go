@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -253,5 +254,18 @@ func TestVolumeIORatesFollowWrites(t *testing.T) {
 	d := s.Disks[vol]
 	if d.WriteBps == nil || *d.WriteBps <= 0 {
 		t.Fatalf("WriteBps for %s = %v after 64 MB write", d.Mount, d.WriteBps)
+	}
+}
+
+func TestSampleReportsCPUTemperature(t *testing.T) {
+	s, err := New().Sample(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOARCH != "arm64" {
+		t.Skip("die sensors are read on Apple silicon only")
+	}
+	if s.CPU.TempC == nil || s.CPU.TempMaxC == nil || *s.CPU.TempC < 15 || *s.CPU.TempMaxC < *s.CPU.TempC {
+		t.Fatalf("temperature %v / %v", s.CPU.TempC, s.CPU.TempMaxC)
 	}
 }
