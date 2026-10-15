@@ -138,9 +138,17 @@ func Shell(c *ui.Context, a *App, content func()) {
 			})
 		})
 	})
-	if !v.Conn.LastOK.IsZero() {
-		c.After(time.Second) // ages tick
+	if ageTick(v.Conn) {
+		c.After(time.Second) // "last seen Ns ago" ticks
 	}
+}
+
+// ageTick reports whether the window must redraw every second for an age
+// to count up: only while the host is behind (stale, offline, …) and was
+// seen once. An online host's view is redrawn by every poll anyway, so a
+// per-second frame would only cost CPU.
+func ageTick(conn hub.Conn) bool {
+	return conn.State != hub.Online && !conn.LastOK.IsZero()
 }
 
 // sidebar draws the left navigation: the grouped page rows with live values,

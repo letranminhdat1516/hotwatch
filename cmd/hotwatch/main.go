@@ -18,6 +18,7 @@ func main() {
 	start := time.Now()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(log)
+	startProfile(log)
 	fatal := func(msg string, err error) {
 		log.Error(msg, "err", err)
 		os.Exit(1)

@@ -662,9 +662,11 @@ func (c *core) publish(id string, v hub.HostView) {
 		c.times.applied(id, v)
 		if c.nook != nil {
 			c.nook.observe(id, v.Conn.State, time.Now())
-			c.nook.bar.redraw()
-			if c.nook.shown {
-				c.nook.island.redraw()
+			if id == c.nook.app.Selected() { // the nook shows the selected host only
+				c.nook.bar.redraw()
+				if c.nook.shown {
+					c.nook.island.redraw()
+				}
 			}
 		}
 	})
