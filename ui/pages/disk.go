@@ -47,8 +47,8 @@ func Disk(c *ui.Context, v hub.HostView, now time.Time) {
 					}
 				})
 		})
-		components.TimeChart(c, "Disk throughput", "B/s", map[string][]hub.Point{
-			"Read": points(v, "disk.read"), "Write": points(v, "disk.write")}, now)
+		components.DotTimeChart(c, "Disk throughput", "B/s", []components.Series{
+			{Name: "Read", Pts: points(v, "disk.read")}, {Name: "Write", Pts: points(v, "disk.write")}}, now, metricTint(c, "disk"))
 		procSection(c, v, "Top processes by disk I/O", func() {
 			io := func(p model.Process) float64 {
 				var sum float64

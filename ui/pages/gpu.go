@@ -70,7 +70,7 @@ func GPU(c *ui.Context, v hub.HostView, now time.Time) {
 		if unknown {
 			return // the newest history point is a carried-over value
 		}
-		components.TimeChart(c, "GPU utilisation", "%", map[string][]hub.Point{"GPU": points(v, "gpu")}, now)
+		components.DotTimeChart(c, "GPU utilisation", "%", []components.Series{{Name: "GPU", Pts: points(v, "gpu")}}, now, metricTint(c, "gpu"))
 		if len(s.GPUs) > 1 {
 			note(c, fmt.Sprintf("Chart shows the first GPU (%s)", s.GPUs[0].Name))
 		}

@@ -26,40 +26,43 @@ const (
 // scales to the window's largest bucket with headroom. Unknown values
 // (NaN, Inf) are ignored.
 func Sparkline(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color) ui.Element {
-	return dotMatrix(c, pts, from, to, ceiling, tint, chartH)
+	return dotMatrix(c, [][]hub.Point{pts}, from, to, ceiling, tint, chartH)
 }
 
 // DotChart is a taller dot matrix with a time axis under it, for a page's
 // main chart.
 func DotChart(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
-	t := c.Theme()
 	return ui.Column(c).Gap(Grid / 2).Children(func() {
-		dotMatrix(c, pts, from, to, ceiling, tint, height)
-		ui.Box(c).Height(16).Draw(func(p *ui.Painter, r ui.Rect) {
-			ticks := xTicksFor(to.Sub(from))
-			x0, w := r.X+chartPad, r.W-2*chartPad
-			for i, tk := range ticks {
-				tw, _ := p.MeasureText(0, ui.Span{Text: tk.Label, Size: 11})
-				x := x0 + w*tk.At - tw/2
-				switch i {
-				case 0:
-					x = x0
-				case len(ticks) - 1:
-					x = x0 + w - tw
-				}
-				p.Text(x, r.Y, tk.Label, 11, t.TextMuted)
-			}
-		})
+		dotMatrix(c, [][]hub.Point{pts}, from, to, ceiling, tint, height)
+		timeAxis(c, to.Sub(from))
 	})
 }
 
-// dotMatrix draws the dot matrix on its tinted backdrop at height.
-func dotMatrix(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
+// timeAxis is the row of tick labels under a dot matrix, "−5m" … "now",
+// aligned with the matrix's padding.
+func timeAxis(c *ui.Context, window time.Duration) ui.Element {
+	t := c.Theme()
+	return ui.Row(c).Justify(ui.SpaceBetween).Padding(0, chartPad).Children(func() {
+		for _, tk := range xTicksFor(window) {
+			ui.Text(c, tk.Label).FontSize(11).TextColor(t.TextMuted).NoWrap()
+		}
+	})
+}
+
+// dotMatrix draws layers on a tinted backdrop at height: the first layer in
+// tint, the second in a lighter tint behind it (it shows where it rises
+// above the first), all on one scale.
+func dotMatrix(c *ui.Context, layers [][]hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
 	box := ui.Box(c).Height(height).Radius(chartRadius).Background(tint.Alpha(0.10))
-	if len(pts) == 0 || !to.After(from) {
+	empty := true
+	for _, l := range layers {
+		empty = empty && len(l) == 0
+	}
+	if empty || !to.After(from) {
 		return box
 	}
-	off, on := tint.Alpha(0.18), tint
+	off := tint.Alpha(0.18)
+	colors := []ui.Color{tint, tint.Alpha(0.45)}
 	return box.Draw(func(p *ui.Painter, r ui.Rect) {
 		inner := ui.Rect{X: r.X + chartPad, Y: r.Y + chartPad, W: r.W - 2*chartPad, H: r.H - 2*chartPad}
 		cols := int(inner.W / dotPitch)
@@ -68,16 +71,18 @@ func dotMatrix(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float
 		}
 		// Taller charts get more rows, so the dot pitch stays the same both ways.
 		rows := max(dotRows, int(inner.H/dotPitch))
-		lit := dotColumns(pts, from, to, cols, rows, ceiling)
+		lit := DotLayers(layers, from, to, cols, rows, ceiling)
 		pitchX := inner.W / float32(cols)
 		pitchY := inner.H / float32(rows)
-		for j, n := range lit {
+		for j := 0; j < cols; j++ {
 			cx := inner.X + (float32(j)+0.5)*pitchX
 			for row := 0; row < rows; row++ {
 				cy := inner.Y + inner.H - (float32(row)+0.5)*pitchY
 				col := off
-				if row < n {
-					col = on
+				for l := len(lit) - 1; l >= 0; l-- { // the first layer paints last, on top
+					if row < lit[l][j] {
+						col = colors[min(l, len(colors)-1)]
+					}
 				}
 				p.Fill(ui.Rect{X: cx - dotSize/2, Y: cy - dotSize/2, W: dotSize, H: dotSize}, col, dotSize/2)
 			}
@@ -86,32 +91,45 @@ func dotMatrix(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float
 }
 
 // dotColumns buckets pts into cols equal spans of [from, to] and returns,
-// per column, how many of rows dots to light: round(avg/top*rows), where a
-// bucket with a non-zero average lights at least one dot and a bucket
-// without finite samples lights none. top is ceiling, or when ceiling is 0
-// the largest bucket average plus 8% headroom (at least 1).
+// per column, how many of rows dots to light.
 func dotColumns(pts []hub.Point, from, to time.Time, cols, rows int, ceiling float64) []int {
-	sums := make([]float64, cols)
-	counts := make([]int, cols)
+	return DotLayers([][]hub.Point{pts}, from, to, cols, rows, ceiling)[0]
+}
+
+// DotLayers buckets each layer into cols equal spans of [from, to] and
+// returns, per layer and column, how many of rows dots to light:
+// round(avg/top*rows), where a bucket with a non-zero average lights at
+// least one dot and a bucket without finite samples lights none. top is
+// ceiling, or when ceiling is 0 the largest bucket average of any layer plus
+// 8% headroom (at least 1), so the layers share one scale.
+func DotLayers(layers [][]hub.Point, from, to time.Time, cols, rows int, ceiling float64) [][]int {
 	span := to.Sub(from).Seconds()
-	for _, pt := range pts {
-		if !finite(pt.V) || pt.T.Before(from) || pt.T.After(to) {
-			continue
-		}
-		i := int(pt.T.Sub(from).Seconds() / span * float64(cols))
-		if i >= cols {
-			i = cols - 1
-		}
-		sums[i] += pt.V
-		counts[i]++
-	}
-	avgs := make([]float64, cols)
+	avgs := make([][]float64, len(layers))
+	has := make([][]bool, len(layers))
 	top := ceiling
-	for i := range avgs {
-		if counts[i] > 0 {
-			avgs[i] = sums[i] / float64(counts[i])
-			if ceiling == 0 {
-				top = max(top, avgs[i])
+	for l, pts := range layers {
+		sums := make([]float64, cols)
+		counts := make([]int, cols)
+		for _, pt := range pts {
+			if !finite(pt.V) || pt.T.Before(from) || pt.T.After(to) {
+				continue
+			}
+			i := int(pt.T.Sub(from).Seconds() / span * float64(cols))
+			if i >= cols {
+				i = cols - 1
+			}
+			sums[i] += pt.V
+			counts[i]++
+		}
+		avgs[l] = make([]float64, cols)
+		has[l] = make([]bool, cols)
+		for i := range sums {
+			if counts[i] > 0 {
+				avgs[l][i] = sums[i] / float64(counts[i])
+				has[l][i] = true
+				if ceiling == 0 {
+					top = max(top, avgs[l][i])
+				}
 			}
 		}
 	}
@@ -121,16 +139,19 @@ func dotColumns(pts []hub.Point, from, to time.Time, cols, rows int, ceiling flo
 	if top <= 0 {
 		top = 1
 	}
-	out := make([]int, cols)
-	for i := range out {
-		if counts[i] == 0 {
-			continue
+	out := make([][]int, len(layers))
+	for l := range layers {
+		out[l] = make([]int, cols)
+		for i := range out[l] {
+			if !has[l][i] {
+				continue
+			}
+			n := int(math.Round(min(max(avgs[l][i]/top, 0), 1) * float64(rows)))
+			if n == 0 && avgs[l][i] > 0 {
+				n = 1
+			}
+			out[l][i] = n
 		}
-		n := int(math.Round(min(max(avgs[i]/top, 0), 1) * float64(rows)))
-		if n == 0 && avgs[i] > 0 {
-			n = 1
-		}
-		out[i] = n
 	}
 	return out
 }

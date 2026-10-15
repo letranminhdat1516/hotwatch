@@ -3,7 +3,6 @@ package components_test
 import (
 	"math"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,22 +22,24 @@ func pts(vs ...float64) []hub.Point {
 	return out
 }
 
-func TestTimeChartPrintsUnitAndLatestValue(t *testing.T) {
-	series := map[string][]hub.Point{"Total": pts(10, 20, 37.5)}
+var tint = ui.Hex("#6366f1")
+
+func TestDotTimeChartPrintsUnitLatestValueAndTimeAxis(t *testing.T) {
+	series := []components.Series{{Name: "Total", Pts: pts(10, 20, 37.5)}}
 	tt := ui.NewTester(func(c *ui.Context) {
-		components.TimeChart(c, "CPU usage", "%", series, now)
+		components.DotTimeChart(c, "CPU usage", "%", series, now, tint)
 	}, 600, 300)
-	for _, want := range []string{"CPU usage", "%", "Total", "37.5 %"} {
+	for _, want := range []string{"CPU usage", "%", "Total", "37.5 %", "−5m", "−1m", "now"} {
 		if !slices.Contains(tt.Texts(), want) {
 			t.Errorf("missing %q in %q", want, tt.Texts())
 		}
 	}
 }
 
-func TestTimeChartLegendPerSeriesAndRates(t *testing.T) {
-	series := map[string][]hub.Point{"In": pts(100, 2048), "Out": pts(5, 1024)}
+func TestDotTimeChartLegendPerSeriesInGivenOrder(t *testing.T) {
+	series := []components.Series{{Name: "In", Pts: pts(100, 2048)}, {Name: "Out", Pts: pts(5, 1024)}}
 	tt := ui.NewTester(func(c *ui.Context) {
-		components.TimeChart(c, "Network", "B/s", series, now)
+		components.DotTimeChart(c, "Network", "B/s", series, now, tint)
 	}, 600, 300)
 	for _, want := range []string{"B/s", "In", "2.0 KB/s", "Out", "1.0 KB/s"} {
 		if !slices.Contains(tt.Texts(), want) {
@@ -46,14 +47,14 @@ func TestTimeChartLegendPerSeriesAndRates(t *testing.T) {
 		}
 	}
 	if i, o := slices.Index(tt.Texts(), "In"), slices.Index(tt.Texts(), "Out"); i < 0 || o < i {
-		t.Errorf("legend not in name order: %q", tt.Texts())
+		t.Errorf("legend not in the given order: %q", tt.Texts())
 	}
 }
 
-func TestTimeChartOnlyLastFiveMinutes(t *testing.T) {
-	series := map[string][]hub.Point{"Total": {{T: now.Add(-6 * time.Minute), V: 99}}}
+func TestDotTimeChartOnlyTheWindow(t *testing.T) {
+	series := []components.Series{{Name: "Total", Pts: []hub.Point{{T: now.Add(-6 * time.Minute), V: 99}}}}
 	tt := ui.NewTester(func(c *ui.Context) {
-		components.TimeChart(c, "CPU usage", "%", series, now)
+		components.DotTimeChart(c, "CPU usage", "%", series, now, tint)
 	}, 600, 300)
 	if slices.Contains(tt.Texts(), "99.0 %") || !slices.Contains(tt.Texts(), "—") {
 		t.Fatalf("point older than the window shown as current: %q", tt.Texts())
@@ -63,13 +64,24 @@ func TestTimeChartOnlyLastFiveMinutes(t *testing.T) {
 	}
 }
 
-func TestTimeChartLatestSkipsNonFinite(t *testing.T) {
-	series := map[string][]hub.Point{"Total": pts(12, math.NaN())}
+func TestDotTimeChartLatestSkipsNonFinite(t *testing.T) {
+	series := []components.Series{{Name: "Total", Pts: pts(12, math.NaN())}}
 	tt := ui.NewTester(func(c *ui.Context) {
-		components.TimeChart(c, "CPU usage", "%", series, now)
+		components.DotTimeChart(c, "CPU usage", "%", series, now, tint)
 	}, 600, 300)
 	if !slices.Contains(tt.Texts(), "12.0 %") {
 		t.Fatalf("latest finite value not shown: %q", tt.Texts())
+	}
+}
+
+func TestDotLayersShareOneScale(t *testing.T) {
+	// Read peaks at 4 MB/s, Write at 1 MB/s: on a shared scale Write lights a
+	// quarter of the rows, not all of them.
+	read := []hub.Point{{T: now.Add(-time.Second), V: 4 << 20}}
+	write := []hub.Point{{T: now.Add(-time.Second), V: 1 << 20}}
+	lit := components.DotLayers([][]hub.Point{read, write}, now.Add(-time.Minute), now, 1, 16, 0)
+	if len(lit) != 2 || lit[0][0] != 15 || lit[1][0] != 4 {
+		t.Fatalf("lit rows %v, want [15] [4] (shared top with 8%% headroom)", lit)
 	}
 }
 
@@ -156,19 +168,3 @@ func TestStackedBarLegend(t *testing.T) {
 	}
 }
 
-func TestTimeChartByteTicksAreRound(t *testing.T) {
-	series := map[string][]hub.Point{"In": pts(100, 1<<20)}
-	tt := ui.NewTester(func(c *ui.Context) {
-		components.TimeChart(c, "Network", "B/s", series, now)
-	}, 600, 400)
-	for _, want := range []string{"0 B/s", "256.0 KB/s", "512.0 KB/s", "768.0 KB/s", "1.0 MB/s"} {
-		if !slices.Contains(tt.Texts(), want) {
-			t.Errorf("missing tick %q in %q", want, tt.Texts())
-		}
-	}
-	for _, x := range tt.Texts() {
-		if strings.Contains(x, "819") || strings.Contains(x, "204") {
-			t.Errorf("odd tick %q", x)
-		}
-	}
-}

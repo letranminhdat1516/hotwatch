@@ -75,7 +75,7 @@ func Memory(c *ui.Context, v hub.HostView, now time.Time) {
 			}
 			note(c, "Swap "+swap)
 		})
-		components.TimeChart(c, "Memory usage", "%", map[string][]hub.Point{"Used": points(v, "mem")}, now)
+		components.DotTimeChart(c, "Memory usage", "%", []components.Series{{Name: "Used", Pts: points(v, "mem")}}, now, metricTint(c, "memory"))
 		if v.Info.OS == "darwin" {
 			procSection(c, v, "Memory by app", func() {
 				apps := byApp(v.Procs)

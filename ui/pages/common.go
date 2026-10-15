@@ -86,6 +86,15 @@ func text(c *ui.Context, s string, end bool) ui.Element {
 	return e
 }
 
+// metricTint is the colour of metric key's charts; a key without one takes
+// the accent, so a chart never comes out blank.
+func metricTint(c *ui.Context, key string) ui.Color {
+	if tint, ok := components.MetricColor(key); ok {
+		return tint
+	}
+	return c.Theme().Accent
+}
+
 // points is the History series of name, nil when the host has no history.
 func points(v hub.HostView, name string) []hub.Point {
 	if v.Hist == nil {

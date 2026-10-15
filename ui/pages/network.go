@@ -87,8 +87,8 @@ func Network(c *ui.Context, v hub.HostView, now time.Time) {
 					}
 				})
 		})
-		components.TimeChart(c, "Network throughput", "B/s", map[string][]hub.Point{
-			"In": points(v, "net.rx"), "Out": points(v, "net.tx")}, now)
+		components.DotTimeChart(c, "Network throughput", "B/s", []components.Series{
+			{Name: "In", Pts: points(v, "net.rx")}, {Name: "Out", Pts: points(v, "net.tx")}}, now, metricTint(c, "network"))
 		procSection(c, v, "Listening ports", func() {
 			ls := listeners(v.Procs)
 			if len(ls) == 0 {

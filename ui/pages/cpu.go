@@ -37,7 +37,7 @@ func CPU(c *ui.Context, v hub.HostView, now time.Time) {
 				}
 			})
 		})
-		components.TimeChart(c, "CPU", "%", map[string][]hub.Point{"Total": points(v, "cpu")}, now)
+		components.DotTimeChart(c, "CPU", "%", []components.Series{{Name: "Total", Pts: points(v, "cpu")}}, now, metricTint(c, "cpu"))
 		procSection(c, v, "Top processes by CPU", func() {
 			top := topProcs(v.Procs, func(model.Process) bool { return true }, func(p model.Process) float64 { return p.CPUPct })
 			table(c, []column{{title: "Name"}, {title: "PID", width: 8 * g(), end: true}, {title: "CPU", width: 10 * g(), end: true}},
