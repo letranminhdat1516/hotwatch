@@ -2,6 +2,8 @@ package pages
 
 import (
 	"fmt"
+	"path"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 
@@ -9,6 +11,7 @@ import (
 	"hotwatch/model"
 	"hotwatch/ui/components"
 	"hotwatch/ui/format"
+	"hotwatch/ui/icons"
 )
 
 // inspector shows the chosen process: its command line, who and when, and
@@ -47,41 +50,90 @@ func (p *Processes) inspector(c *ui.Context, in ProcessesInput, pr *model.Proces
 	unsafe := pr.StartTime.IsZero()
 	running := in.Actions.Running(in.HostID, target) || unsafe
 
-	ui.Column(c).Padding(2 * components.Grid).Gap(2 * components.Grid).Children(func() {
-		ui.Text(c, "Command").FontSize(12).FontWeight(600).TextColor(t.TextMuted)
-		ui.Text(c, command).FontSize(13).Selectable()
-		field := func(label, value string) {
-			ui.Column(c).Gap(2).Children(func() {
-				ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(t.TextMuted)
-				ui.Text(c, value).FontSize(13).Selectable()
+	g := float32(components.Grid)
+	ui.Column(c).Padding(2*g, 2*g).Gap(2 * g).Children(func() {
+		// Header: the icon, the name, PID and user, and a close button.
+		ui.Row(c).Gap(g + 4).AlignItems(ui.Center).Children(func() {
+			appIconSized(c, pr.Name, pr.AppBundle, 44)
+			ui.Column(c).Gap(2).Grow(1).Shrink(1).Children(func() {
+				ui.Text(c, orDash(pr.Name)).FontSize(18).FontWeight(700).SingleLine()
+				ui.Text(c, fmt.Sprintf("PID %d · %s", pr.PID, orDash(pr.User))).FontSize(13).TextColor(t.TextMuted).SingleLine()
+			})
+			closeBtn := ui.Row(c).Key("proc-close").Size(24, 24).Center().Radius(12).Cursor(ui.CursorPointer).Label("Close")
+			if closeBtn.Hovered() {
+				closeBtn.Background(t.SurfaceHover)
+			}
+			if closeBtn.Clicked() {
+				p.hasSel, p.row = false, -1
+			}
+			closeBtn.Children(func() { components.Glyph(c, icons.Close, 14, t.TextMuted) })
+		})
+		// Live figures as tiles, each in its metric's colour.
+		tile := func(key, label, value string) {
+			tint := metricTint(c, key)
+			ui.Column(c).Padding(10, 12).Radius(12).Gap(2).Background(t.SurfaceHover).Children(func() {
+				ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(tint).SingleLine()
+				ui.Text(c, value).FontSize(17).FontWeight(700).SingleLine()
 			})
 		}
-		field("PID", fmt.Sprint(pr.PID))
-		if parent != "" {
-			field("Parent", parent)
-		}
-		field("User", orDash(pr.User))
-		field("Started", started)
-		field("Threads", threads)
-		field("Ports", ports)
-		if pr.AppBundle != "" {
-			field("App", pr.AppBundle)
-		}
-		if unsafe {
-			ui.Text(c, "Start time unknown — cannot signal safely").FontSize(12).TextColor(t.TextMuted)
-		}
-		ui.Row(c).Gap(components.Grid).Children(func() {
+		ui.Grid(c).Columns(2).Gap(g).Children(func() {
+			tile("cpu", "CPU", pctShort(pr.CPUPct))
+			mem := format.Unknown
+			if m := pr.Mem(); m > 0 {
+				mem = format.Bytes(m)
+			}
+			tile("memory", "Memory", mem)
+			if pr.DiskReadBps != nil || pr.DiskWriteBps != nil {
+				tile("disk", "Disk", format.Rate(pr.DiskReadBps)+" ↓ "+format.Rate(pr.DiskWriteBps)+" ↑")
+			}
+			if pr.NetRxBps != nil || pr.NetTxBps != nil {
+				tile("network", "Network", format.Rate(pr.NetRxBps)+" ↓ "+format.Rate(pr.NetTxBps)+" ↑")
+			}
+			if pr.PowerMW != nil {
+				tile("energy", "Energy", watts(*pr.PowerMW))
+			}
+			tile("", "Threads", threads)
+		})
+		ui.Row(c).Gap(g).Children(func() {
 			ask := func(dialog *bool) {
 				p.pending = pendingKill{host: in.HostID, name: orDash(pr.Name), pid: pr.PID, nano: startNano(pr.StartTime)}
 				*dialog = true
 			}
-			if ui.Button(c, "Terminate").Disabled(running).Clicked() {
+			if ui.Button(c, "Terminate").Grow(1).Disabled(running).Clicked() {
 				ask(&p.askTerm)
 			}
-			if ui.Button(c, "Force kill").Disabled(running).Clicked() {
+			kill := ui.Button(c, "Force kill").Grow(1).Disabled(running)
+			if !running {
+				kill.TextColor(t.Danger)
+			}
+			if kill.Clicked() {
 				ask(&p.askKill1)
 			}
 		})
+		if unsafe {
+			ui.Text(c, "Start time unknown — cannot signal safely").FontSize(12).TextColor(t.TextMuted)
+		}
+		ui.Text(c, "DETAILS").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g/2, 0, 0, 0)
+		ui.Column(c).Gap(g).Children(func() {
+			kvRow(c, "PID", fmt.Sprint(pr.PID))
+			if parent != "" {
+				kvRow(c, "Parent", parent)
+			}
+			kvRow(c, "User", orDash(pr.User))
+			kvRow(c, "Started", started)
+			kvRow(c, "Ports", ports)
+			if pr.AppBundle != "" {
+				kvRow(c, "App", strings.TrimSuffix(path.Base(outerBundle(pr.AppBundle)), ".app"))
+			}
+		})
+		ui.Text(c, "COMMAND").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g/2, 0, 0, 0)
+		ui.Column(c).Padding(10, 12).Radius(10).Background(t.SurfaceHover).Children(func() {
+			ui.Text(c, command).FontSize(12).Font("Menlo").Selectable()
+		})
+		if pr.AppBundle != "" {
+			ui.Text(c, "PATH").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g/2, 0, 0, 0)
+			ui.Text(c, pr.AppBundle).FontSize(12).Font("Menlo").TextColor(t.TextMuted).Selectable()
+		}
 	})
 }
 
