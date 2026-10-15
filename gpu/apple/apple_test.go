@@ -68,3 +68,14 @@ func BenchmarkRead(b *testing.B) {
 		}
 	}
 }
+
+func TestFromStatsEngines(t *testing.T) {
+	g := fromStats("Apple M5", map[string]any{"Renderer Utilization %": int64(46), "Tiler Utilization %": int64(14),
+		"Alloc system memory": int64(2530000000), "Device Utilization %": int64(46)})
+	if g.RendererPct == nil || *g.RendererPct != 46 || g.TilerPct == nil || *g.TilerPct != 14 || g.MemAlloc == nil || *g.MemAlloc != 2530000000 {
+		t.Fatalf("got %+v", g)
+	}
+	if bad := fromStats("x", map[string]any{"Tiler Utilization %": int64(140)}); bad.TilerPct != nil || bad.RendererPct != nil {
+		t.Fatalf("out-of-range engines must be unknown: %+v", bad)
+	}
+}

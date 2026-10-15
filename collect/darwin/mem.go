@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"context"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/mem"
 	"golang.org/x/sys/unix"
@@ -17,7 +18,7 @@ import (
 // compressor occupies, Used ("in use") = App + Wired + Compressed, and
 // Cached = file-backed + purgeable pages (memory macOS frees on demand).
 // Total and swap come from sysctl through gopsutil.
-func readMemory(ctx context.Context) (model.Memory, error) {
+func (c *collector) readMemory(ctx context.Context, at time.Time) (model.Memory, error) {
 	vm, err := mem.VirtualMemoryWithContext(ctx)
 	if err != nil {
 		return model.Memory{}, err
@@ -40,7 +41,26 @@ func readMemory(ctx context.Context) (model.Memory, error) {
 	if sw, err := mem.SwapMemoryWithContext(ctx); err == nil {
 		m.SwapTotal, m.SwapUsed = sw.Total, sw.Used
 	}
+	if lvl, err := unix.SysctlUint32("kern.memorystatus_level"); err == nil && lvl <= 100 {
+		p := float64(100 - lvl)
+		m.PressurePct = &p
+	}
+	if !c.prevVMAt.IsZero() {
+		m.PageInsPS = pageRate(c.prevVM.Pageins, st.Pageins, at.Sub(c.prevVMAt))
+		m.SwapOutsPS = pageRate(c.prevVM.Swapouts, st.Swapouts, at.Sub(c.prevVMAt))
+	}
+	c.prevVM, c.prevVMAt = st, at
 	return m, nil
+}
+
+// pageRate is the per-second change of a page counter; nil when the
+// interval is empty or the counter went back (a reset).
+func pageRate(prev, cur uint64, dt time.Duration) *float64 {
+	if dt <= 0 || cur < prev {
+		return nil
+	}
+	r := float64(cur-prev) / dt.Seconds()
+	return &r
 }
 
 // pressure maps kern.memorystatus_vm_pressure_level (1 normal, 2 warn, 4

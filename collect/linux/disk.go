@@ -132,6 +132,8 @@ func (c *collector) sampleDisks(ctx context.Context, now time.Time, out *[]model
 		v := model.Volume{Mount: m.mount, FS: m.fs, Device: m.dev, Total: total, Used: total - min(free, total)}
 		dev := filepath.Base(m.dev)
 		if cur, found := stats[dev]; found && strings.HasPrefix(m.dev, "/dev/") {
+			r, w := cur.read, cur.write
+			v.ReadBytes, v.WriteBytes = &r, &w
 			if prev, had := c.prevDisk[dev]; had {
 				v.ReadBps = model.Rate(prev.read, cur.read, dt)
 				v.WriteBps = model.Rate(prev.write, cur.write, dt)

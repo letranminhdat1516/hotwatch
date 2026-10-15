@@ -59,7 +59,18 @@ func (c *collector) sampleNet(now time.Time, out *[]model.Interface) bool {
 	sort.Strings(names)
 	ifs := make([]model.Interface, 0, len(names))
 	for _, n := range names {
-		it := model.Interface{Name: n, Up: c.ifaceUp(n)}
+		rx, tx := cur[n].rx, cur[n].tx
+		it := model.Interface{Name: n, Up: c.ifaceUp(n), RxBytes: &rx, TxBytes: &tx}
+		switch {
+		case strings.HasPrefix(n, "wl"):
+			it.Kind, it.Label = "wifi", "Wi-Fi"
+		case strings.HasPrefix(n, "tailscale"), strings.HasPrefix(n, "wg"), strings.HasPrefix(n, "tun"):
+			it.Kind, it.Label = "vpn", "VPN"
+		case strings.HasPrefix(n, "en"), strings.HasPrefix(n, "eth"):
+			it.Kind, it.Label = "ethernet", "Ethernet"
+		case strings.HasPrefix(n, "docker"), strings.HasPrefix(n, "br-"), strings.HasPrefix(n, "veth"), strings.HasPrefix(n, "cni"):
+			it.Kind = "bridge"
+		}
 		if c.ifaddrs != nil {
 			it.Addrs = c.ifaddrs(n)
 		}

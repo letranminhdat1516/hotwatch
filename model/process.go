@@ -30,8 +30,12 @@ type Process struct {
 	// milliwatts (macOS: ri_energy_nj); nil = not readable.
 	PowerMW      *float64 `json:"powerMW,omitempty"`
 	DiskWriteBps *float64 `json:"diskWriteBps,omitempty"`
-	Ports        []Port   `json:"ports,omitempty"`     // listening
-	AppBundle    string   `json:"appBundle,omitempty"` // macOS only
+	// NetRxBps and NetTxBps are the process's network traffic (macOS:
+	// nettop's per-process byte counts); nil = not known yet.
+	NetRxBps  *float64 `json:"netRxBps,omitempty"`
+	NetTxBps  *float64 `json:"netTxBps,omitempty"`
+	Ports     []Port   `json:"ports,omitempty"`     // listening
+	AppBundle string   `json:"appBundle,omitempty"` // macOS only
 }
 
 type Port struct {

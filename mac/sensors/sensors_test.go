@@ -12,3 +12,16 @@ func TestSummaryOfCPUDies(t *testing.T) {
 		t.Fatal("no die sensors must report no CPU temperature")
 	}
 }
+
+func TestStorageAndBatterySensors(t *testing.T) {
+	r := []Reading{{"NAND CH0 temp", 43}, {"gas gauge battery", 33}, {"gas gauge battery", 31}, {"PMU tdie1", 50}, {"NAND CH1 temp", -9000}}
+	if c, ok := Storage(r); !ok || c != 43 {
+		t.Fatalf("storage %v %v", c, ok)
+	}
+	if c, ok := Battery(r); !ok || c != 32 {
+		t.Fatalf("battery %v %v", c, ok)
+	}
+	if _, ok := Storage(nil); ok {
+		t.Fatal("no sensors: unknown")
+	}
+}

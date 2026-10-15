@@ -5,6 +5,7 @@ package darwin
 import (
 	"context"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -57,14 +58,72 @@ func (c *collector) physical(ctx context.Context, name string, io map[string]dis
 			c.apfsTried = map[string]bool{}
 		}
 		c.apfsTried[name] = true
-		if data, err := c.apfsList(ctx); err == nil {
-			if m, err := parseAPFSList(data); err == nil {
-				c.apfs = m
-			}
-		}
+		c.refreshAPFS(ctx)
 		return c.apfs[name]
 	}
 	return nil
+}
+
+// refreshAPFS re-reads the APFS containers and volume names.
+func (c *collector) refreshAPFS(ctx context.Context) {
+	data, err := c.apfsList(ctx)
+	if err != nil {
+		return
+	}
+	if m, err := parseAPFSList(data); err == nil {
+		c.apfs = m
+	}
+	if m, err := parseAPFSVolumeNames(data); err == nil {
+		c.apfsNames = m
+	}
+}
+
+// volumeName is the APFS name of the volume on device ("/dev/disk3s1s1",
+// the sealed snapshot of disk3s1, is "Macintosh HD"); otherwise the last
+// part of a mount under /Volumes; "" when neither is known.
+func (c *collector) volumeName(ctx context.Context, device, mount, fs string) string {
+	id := strings.TrimPrefix(device, "/dev/")
+	if strings.EqualFold(fs, "apfs") {
+		if c.apfsNames == nil && !c.apfsNamesTried {
+			c.apfsNamesTried = true
+			c.refreshAPFS(ctx)
+		}
+		for cur := id; cur != ""; {
+			if n, ok := c.apfsNames[cur]; ok {
+				return n
+			}
+			i := strings.LastIndex(cur, "s")
+			if i <= len("disk") {
+				break
+			}
+			cur = cur[:i]
+		}
+	}
+	if strings.HasPrefix(mount, "/Volumes/") {
+		return strings.TrimPrefix(mount, "/Volumes/")
+	}
+	return ""
+}
+
+// imageDisks returns the whole-disk names of attached disk images, asking
+// hdiutil again only when the set of mounted devices changes.
+func (c *collector) imageDisks(ctx context.Context, devices []string) map[string]bool {
+	sort.Strings(devices)
+	key := strings.Join(devices, ",")
+	if key == c.imagesKey && c.images != nil {
+		return c.images
+	}
+	c.imagesKey = key
+	c.images = map[string]bool{}
+	if c.hdiutil == nil {
+		return c.images
+	}
+	if data, err := c.hdiutil(ctx); err == nil {
+		if m, err := parseImageDisks(data); err == nil {
+			c.images = m
+		}
+	}
+	return c.images
 }
 
 // sumIO adds the counters of names; ok is false if any is missing.
@@ -99,9 +158,20 @@ func (c *collector) sampleDisks(ctx context.Context, at time.Time, out *[]model.
 	seen := map[string]bool{}
 	var vols []model.Volume
 	complete := true
+	var devices []string
+	for _, p := range parts {
+		if strings.HasPrefix(p.Device, "/dev/") {
+			devices = append(devices, p.Device)
+		}
+	}
+	images := c.imageDisks(ctx, devices)
 	for _, p := range parts {
 		if !keepVolume(p.Mountpoint, p.Fstype) || !strings.HasPrefix(p.Device, "/dev/") || seen[p.Mountpoint] {
 			continue
+		}
+		image := images[bsdName(p.Device)]
+		if image && slices.Contains(p.Opts, "nobrowse") {
+			continue // a hidden image (simulator runtimes, app helpers): not the user's
 		}
 		u, err := disk.UsageWithContext(ctx, p.Mountpoint)
 		if err != nil {
@@ -109,19 +179,23 @@ func (c *collector) sampleDisks(ctx context.Context, at time.Time, out *[]model.
 			continue
 		}
 		seen[p.Mountpoint] = true
-		v := model.Volume{Mount: p.Mountpoint, FS: p.Fstype, Device: p.Device, Total: u.Total, Used: u.Used}
+		v := model.Volume{Mount: p.Mountpoint, FS: p.Fstype, Device: p.Device, Total: u.Total, Used: u.Used,
+			Name: c.volumeName(ctx, p.Device, p.Mountpoint, p.Fstype), Image: image}
 		if strings.EqualFold(p.Fstype, "apfs") {
 			if name := bsdName(p.Device); name != "" {
 				v.Device = name // volumes of one container share its capacity
 			}
 		}
-		if name := bsdName(p.Device); name != "" && c.prevDisk != nil {
+		if name := bsdName(p.Device); name != "" && ioErr == nil {
 			if stores := c.physical(ctx, name, cur); stores != nil {
-				p, ok1 := sumIO(c.prevDisk, stores)
 				n, ok2 := sumIO(cur, stores)
-				if ok1 && ok2 {
-					v.ReadBps = model.Rate(p.read, n.read, dt)
-					v.WriteBps = model.Rate(p.write, n.write, dt)
+				if ok2 {
+					r, w := n.read, n.write
+					v.ReadBytes, v.WriteBytes = &r, &w
+				}
+				if prev, ok1 := sumIO(c.prevDisk, stores); ok1 && ok2 && c.prevDisk != nil {
+					v.ReadBps = model.Rate(prev.read, n.read, dt)
+					v.WriteBps = model.Rate(prev.write, n.write, dt)
 				}
 			}
 		}

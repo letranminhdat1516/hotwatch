@@ -61,6 +61,7 @@ func Read(ctx context.Context) (*model.Battery, error) {
 	props := smartBatteryProps()
 	b.PowerW, b.TempC = smartBattery(props)
 	batteryHealth(&b, props)
+	adapter(&b, props)
 	b.ThermalState = ThermalState()
 	list, err := Assertions(ctx)
 	b.Assertions = list
@@ -122,7 +123,8 @@ func fromPowerSource(d map[string]any) (model.Battery, bool) {
 }
 
 var smartBatteryKeys = []string{"InstantAmperage", "Voltage", "Temperature",
-	"AppleRawMaxCapacity", "DesignCapacity", "CycleCount"}
+	"AppleRawMaxCapacity", "DesignCapacity", "CycleCount", "ExternalConnected",
+	"AdapterDetails", "PowerTelemetryData"}
 
 // smartBatteryProps reads only the few AppleSmartBattery properties needed;
 // the full property table is large (BatteryData, LifetimeData) and not read.
@@ -216,5 +218,25 @@ func batteryHealth(b *model.Battery, p map[string]any) {
 		m, d := int(maxCap), int(design)
 		h := float64(maxCap) / float64(design) * 100
 		b.CapacityMAh, b.DesignMAh, b.HealthPct = &m, &d, &h
+	}
+}
+
+// adapter reads the connected power adapter (AdapterDetails: its rating in
+// W and name) and what the whole computer draws (PowerTelemetryData
+// SystemLoad, mW). Nothing is set on battery or when the gauge omits them.
+func adapter(b *model.Battery, p map[string]any) {
+	if ext, ok := cf.Bool(p, "ExternalConnected"); ok && ext {
+		if d, ok := p["AdapterDetails"].(map[string]any); ok {
+			if w, ok := cf.Float(d, "Watts"); ok && w > 0 {
+				b.AdapterW = &w
+			}
+			b.AdapterName = cf.Str(d, "Name")
+		}
+	}
+	if t, ok := p["PowerTelemetryData"].(map[string]any); ok {
+		if mw, ok := cf.Float(t, "SystemLoad"); ok && mw > 0 && mw < 1e6 {
+			w := mw / 1000
+			b.SystemW = &w
+		}
 	}
 }

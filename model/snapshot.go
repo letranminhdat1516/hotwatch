@@ -12,6 +12,9 @@ type Snapshot struct {
 	GPUs    []GPU         `json:"gpus,omitempty"`
 	Battery *Battery      `json:"battery,omitempty"` // nil when absent
 	Uptime  time.Duration `json:"uptime"`
+	// StorageTempC is the internal storage's temperature (macOS: the NAND
+	// sensor), °C; nil where unreadable.
+	StorageTempC *float64 `json:"storageTempC,omitempty"`
 	// Partial names sections (cpu, memory, disks, net, gpu, battery) whose
 	// values were carried over or unreadable in this sample.
 	Partial []string `json:"partial,omitempty"`
@@ -43,6 +46,13 @@ type Memory struct {
 	SwapTotal  uint64 `json:"swapTotal"`
 	SwapUsed   uint64 `json:"swapUsed"`
 	Pressure   string `json:"pressure"`
+	// PressurePct is how hard the system works to keep memory available,
+	// 0–100 (macOS: 100 − kern.memorystatus_level); nil where unknown.
+	PressurePct *float64 `json:"pressurePct,omitempty"`
+	// PageInsPS and SwapOutsPS are pages read in from files and pages
+	// swapped out, per second; nil on the first sample and where unknown.
+	PageInsPS  *float64 `json:"pageInsPs,omitempty"`
+	SwapOutsPS *float64 `json:"swapOutsPs,omitempty"`
 }
 
 // Volume is one mounted file system. Device identifies the storage whose
@@ -58,6 +68,14 @@ type Volume struct {
 	Used     uint64   `json:"used"`
 	ReadBps  *float64 `json:"readBps,omitempty"`
 	WriteBps *float64 `json:"writeBps,omitempty"`
+	// Name is the volume's own name ("Macintosh HD"); "" where unknown.
+	Name string `json:"name,omitempty"`
+	// ReadBytes and WriteBytes are the bytes the volume's storage has read
+	// and written since the host started; nil where unknown.
+	ReadBytes  *uint64 `json:"readBytes,omitempty"`
+	WriteBytes *uint64 `json:"writeBytes,omitempty"`
+	// Image marks a mounted disk image (.dmg).
+	Image bool `json:"image,omitempty"`
 }
 
 // DistinctVolumes returns the first volume of each Device, in order, so
@@ -91,6 +109,15 @@ type Interface struct {
 	RxBps *float64 `json:"rxBps,omitempty"`
 	TxBps *float64 `json:"txBps,omitempty"`
 	Up    bool     `json:"up"`
+	// Kind is "wifi", "ethernet", "vpn", "bridge" or "" when unknown; Label
+	// the system's name for it ("Wi-Fi"); MAC its hardware address.
+	Kind  string `json:"kind,omitempty"`
+	Label string `json:"label,omitempty"`
+	MAC   string `json:"mac,omitempty"`
+	// RxBytes and TxBytes are the bytes received and sent since the host
+	// started; nil where unknown.
+	RxBytes *uint64 `json:"rxBytes,omitempty"`
+	TxBytes *uint64 `json:"txBytes,omitempty"`
 }
 
 type GPU struct {
@@ -99,6 +126,12 @@ type GPU struct {
 	MemUsed  *uint64  `json:"memUsed,omitempty"`
 	MemTotal *uint64  `json:"memTotal,omitempty"`
 	TempC    *float64 `json:"tempC,omitempty"`
+	// RendererPct and TilerPct are the busy share of the GPU's two engines
+	// (Apple GPUs); MemAlloc the memory the driver has allocated. nil where
+	// the driver does not report them.
+	RendererPct *float64 `json:"rendererPct,omitempty"`
+	TilerPct    *float64 `json:"tilerPct,omitempty"`
+	MemAlloc    *uint64  `json:"memAlloc,omitempty"`
 }
 
 type Battery struct {
@@ -117,6 +150,12 @@ type Battery struct {
 	CapacityMAh *int        `json:"capacityMAh,omitempty"`
 	DesignMAh   *int        `json:"designMAh,omitempty"`
 	Assertions  []Assertion `json:"assertions,omitempty"`
+	// AdapterW is the connected power adapter's rating and AdapterName its
+	// name ("140W USB-C Power Adapter"); SystemW what the whole computer
+	// draws. nil / "" where unknown or on battery.
+	AdapterW    *float64 `json:"adapterW,omitempty"`
+	AdapterName string   `json:"adapterName,omitempty"`
+	SystemW     *float64 `json:"systemW,omitempty"`
 }
 
 // Assertion is a power assertion (something keeping the machine awake).

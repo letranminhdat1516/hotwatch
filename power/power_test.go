@@ -155,3 +155,18 @@ func TestBatteryHealthFromCapacities(t *testing.T) {
 		t.Fatalf("without capacities: %+v", none)
 	}
 }
+
+func TestAdapterAndSystemPower(t *testing.T) {
+	var b model.Battery
+	adapter(&b, map[string]any{"ExternalConnected": true,
+		"AdapterDetails":     map[string]any{"Watts": int64(94), "Name": "140W USB-C Power Adapter"},
+		"PowerTelemetryData": map[string]any{"SystemLoad": int64(12400)}})
+	if b.AdapterW == nil || *b.AdapterW != 94 || b.AdapterName != "140W USB-C Power Adapter" || b.SystemW == nil || *b.SystemW != 12.4 {
+		t.Fatalf("got %+v", b)
+	}
+	var onBattery model.Battery
+	adapter(&onBattery, map[string]any{"ExternalConnected": false, "AdapterDetails": map[string]any{"Watts": int64(94)}})
+	if onBattery.AdapterW != nil || onBattery.AdapterName != "" || onBattery.SystemW != nil {
+		t.Fatalf("on battery there is no adapter: %+v", onBattery)
+	}
+}

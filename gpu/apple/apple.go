@@ -19,6 +19,9 @@ const (
 	keyModel     = "model"
 	keyUtil      = "Device Utilization %"
 	keyMemInUse  = "In use system memory"
+	keyMemAlloc  = "Alloc system memory"
+	keyRenderer  = "Renderer Utilization %"
+	keyTiler     = "Tiler Utilization %"
 	fallbackName = "Apple GPU"
 )
 
@@ -69,5 +72,19 @@ func fromStats(gpuName string, stats map[string]any) model.GPU {
 		mu := uint64(m)
 		g.MemUsed = &mu
 	}
+	if m, ok := cf.Int(stats, keyMemAlloc); ok && m >= 0 {
+		ma := uint64(m)
+		g.MemAlloc = &ma
+	}
+	g.RendererPct = pctKey(stats, keyRenderer)
+	g.TilerPct = pctKey(stats, keyTiler)
 	return g
+}
+
+// pctKey reads a 0–100 value; nil when absent or out of range.
+func pctKey(stats map[string]any, key string) *float64 {
+	if u, ok := cf.Float(stats, key); ok && u >= 0 && u <= 100 {
+		return &u
+	}
+	return nil
 }

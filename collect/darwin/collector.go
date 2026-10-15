@@ -23,23 +23,35 @@ type collector struct {
 	lastCPU  model.CPU
 	haveLast bool
 
-	prevDisk   map[string]diskCounters
-	prevDiskAt time.Time
-	apfs       map[string][]string // APFS container disk -> physical store disks
-	apfsTried  map[string]bool     // containers for which a refresh was attempted
-	apfsList   func(context.Context) ([]byte, error)
-	prevNet    map[string]netCounters
-	prevNetAt  time.Time
+	prevDisk       map[string]diskCounters
+	prevDiskAt     time.Time
+	apfs           map[string][]string // APFS container disk -> physical store disks
+	apfsTried      map[string]bool     // containers for which a refresh was attempted
+	apfsList       func(context.Context) ([]byte, error)
+	apfsNames      map[string]string // APFS volume device (disk3s1) -> name
+	apfsNamesTried bool
+	hdiutil        func(context.Context) ([]byte, error) // nil: no disk image detection
+	images         map[string]bool                       // whole disks of attached images
+	imagesKey      string                                // the mounted devices images was read for
+	prevNet        map[string]netCounters
+	prevVM         vmStatistics64
+	prevVMAt       time.Time
+	prevNetAt      time.Time
+	netKinds       map[string]netKind
+	netKindsKey    string
 
 	prevProc map[procKey]procPrev
 	statics  map[procKey]procStatic // static facts of the last scan's processes
 	ports    portCache
 	lsof     func(context.Context) ([]byte, error) // nil = runLsof
+	nettop   func(context.Context) ([]byte, error) // nil: no per-process network
 }
 
 // New returns a Collector for the local Mac. Sample must not be called
 // concurrently.
-func New() collect.Collector { return &collector{now: time.Now, apfsList: runDiskutilAPFS} }
+func New() collect.Collector {
+	return &collector{now: time.Now, apfsList: runDiskutilAPFS, hdiutil: runHdiutilInfo, nettop: runNettop}
+}
 
 func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
 	if err := ctx.Err(); err != nil {
@@ -70,8 +82,11 @@ func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
 		if avg, hot, ok := sensors.CPU(r); ok {
 			s.CPU.TempC, s.CPU.TempMaxC = &avg, &hot
 		}
+		if t, ok := sensors.Storage(r); ok {
+			s.StorageTempC = &t
+		}
 	}
-	if mem, err := readMemory(ctx); err != nil {
+	if mem, err := c.readMemory(ctx, s.Time); err != nil {
 		add("memory")
 	} else {
 		s.Memory = mem

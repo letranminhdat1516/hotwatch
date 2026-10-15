@@ -31,6 +31,8 @@ type procPrev struct {
 	read, write uint64
 	energy      uint64 // energy used, nJ
 	haveIO      bool
+	net         netBytes // nettop's counters
+	haveNet     bool
 	at          time.Time
 }
 
@@ -52,6 +54,12 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 		return nil, err
 	}
 	ports := c.listeningPorts(ctx, now)
+	var net map[int32]netBytes
+	if c.nettop != nil {
+		if data, err := c.nettop(ctx); err == nil {
+			net = parseNettop(data)
+		}
+	}
 
 	results := make([]*procResult, len(list))
 	var wg sync.WaitGroup
@@ -82,6 +90,12 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 		}
 		prev, seen := c.prevProc[r.key]
 		cur := r.prev
+		cur.net, cur.haveNet = net[r.p.PID]
+		if seen && cur.haveNet && prev.haveNet {
+			dt := now.Sub(prev.at)
+			r.p.NetRxBps = model.Rate(prev.net.in, cur.net.in, dt)
+			r.p.NetTxBps = model.Rate(prev.net.out, cur.net.out, dt)
+		}
 		if seen {
 			dt := now.Sub(prev.at)
 			if dt > 0 && cur.cpuSecs >= prev.cpuSecs {
