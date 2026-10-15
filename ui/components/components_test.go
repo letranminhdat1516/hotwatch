@@ -145,8 +145,8 @@ func TestBannerAndEmptyState(t *testing.T) {
 func TestBarRowShowsLabelAndValue(t *testing.T) {
 	v := 42.5
 	tt := ui.NewTester(func(c *ui.Context) {
-		components.BarRow(c, "Core 1", &v, "42.5 %")
-		components.BarRow(c, "Core 2", nil, "—")
+		components.BarRow(c, "Core 1", &v, "42.5 %", tint)
+		components.BarRow(c, "Core 2", nil, "—", tint)
 	}, 400, 100)
 	for _, want := range []string{"Core 1", "42.5 %", "Core 2", "—"} {
 		if !slices.Contains(tt.Texts(), want) {

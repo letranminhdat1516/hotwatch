@@ -33,7 +33,7 @@ func CPU(c *ui.Context, v hub.HostView, now time.Time) {
 			}
 			ui.Grid(c).Columns(2).GapX(3 * g()).GapY(g()).Children(func() {
 				for i, p := range s.CPU.PerCore {
-					components.BarRow(c, fmt.Sprintf("Core %d", i+1), ptr(p), pct(p))
+					components.BarRow(c, fmt.Sprintf("Core %d", i+1), ptr(p), pct(p), metricTint(c, "cpu"))
 				}
 			})
 		})

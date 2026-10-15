@@ -61,12 +61,15 @@ func shortDuration(d time.Duration) string {
 }
 
 // SeriesColors are the colours of the parts of a donut or stacked bar, in
-// order: the accent, then three more.
+// order: the memory colour (App / Used), indigo, amber, then fuchsia — the
+// approved palette for memory by type; never the accent, which marks
+// selection and actions only.
 func SeriesColors(t *ui.Theme) []ui.Color {
 	if t.Dark {
-		return []ui.Color{t.Accent, ui.Hex("#8f9cf5"), ui.Hex("#f0b35a"), ui.Hex("#e486bd")}
+		return []ui.Color{ui.Hex("#34d399"), ui.Hex("#818cf8"), ui.Hex("#fbbf24"), ui.Hex("#e879f9")}
 	}
-	return []ui.Color{t.Accent, ui.Hex("#5466d6"), ui.Hex("#c9821a"), ui.Hex("#bf4a8c")}
+	mem, _ := MetricColor("memory")
+	return []ui.Color{mem, ui.Hex("#6366f1"), ui.Hex("#f59e0b"), ui.Hex("#d946ef")}
 }
 
 // FormatValue formats v in unit: "%" as "37.5 %", "B/s" and "B" with a

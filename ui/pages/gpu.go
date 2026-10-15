@@ -78,9 +78,10 @@ func GPU(c *ui.Context, v hub.HostView, now time.Time) {
 }
 
 func gpuBody(c *ui.Context, gpu model.GPU) {
-	components.BarRow(c, "Usage", gpu.UtilPct, format.Percent(gpu.UtilPct))
+	tint := metricTint(c, "gpu")
+	components.BarRow(c, "Usage", gpu.UtilPct, format.Percent(gpu.UtilPct), tint)
 	if gpu.MemUsed != nil && gpu.MemTotal != nil && *gpu.MemTotal > 0 {
-		components.BarRow(c, "VRAM", ratio(*gpu.MemUsed, *gpu.MemTotal), format.Percent(ratio(*gpu.MemUsed, *gpu.MemTotal)))
+		components.BarRow(c, "VRAM", ratio(*gpu.MemUsed, *gpu.MemTotal), format.Percent(ratio(*gpu.MemUsed, *gpu.MemTotal)), tint)
 		note(c, vram(gpu.MemUsed, gpu.MemTotal))
 	} else {
 		kv(c, "VRAM", vram(gpu.MemUsed, gpu.MemTotal))

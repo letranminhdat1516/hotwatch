@@ -148,6 +148,7 @@ func overviewExtras(c *ui.Context, v hub.HostView) {
 		})
 	}
 	if apps := byApp(v.Procs); len(apps) > 0 {
+		barTint := metricTint(c, "memory")
 		var maxRSS, sum uint64
 		for _, a := range apps {
 			maxRSS = max(maxRSS, a.rss)
@@ -170,7 +171,7 @@ func overviewExtras(c *ui.Context, v hub.HostView) {
 						ui.Text(c, a.name).FontSize(12).TextColor(t.Text).Width(16 * g).SingleLine()
 						ui.Box(c).Grow(1).Height(8).Radius(4).Background(t.Border).Draw(func(p *ui.Painter, r ui.Rect) {
 							if fill > 0 {
-								p.Fill(ui.Rect{X: r.X, Y: r.Y, W: max(r.W*fill, 8), H: r.H}, t.Accent, 4)
+								p.Fill(ui.Rect{X: r.X, Y: r.Y, W: max(r.W*fill, 8), H: r.H}, barTint, 4)
 							}
 						})
 						ui.Text(c, format.Bytes(a.rss)).FontSize(12).FontWeight(600).Width(10 * g).TextAlign(ui.End).SingleLine()

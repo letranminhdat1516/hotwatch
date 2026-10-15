@@ -1,10 +1,11 @@
 // Command hwshot renders the app's window to a PNG with representative
 // multi-host data, for iterating on the UI without a live agent. Dev-only.
 //
-//	go run ./cmd/hwshot /tmp/shot.png [page] [hostIndex]
+//	go run ./cmd/hwshot /tmp/shot.png [page] [hostIndex] [- ] [dark]
 package main
 
 import (
+	"image"
 	"image/png"
 	"os"
 	"time"
@@ -148,7 +149,16 @@ func main() {
 	a.SelectForShot(sel, page)
 	a.SetSettings(store.Settings{IntervalMs: 2000})
 
-	img := mui.Render(a.View, 1440, 900, 2)
+	var img image.Image
+	if len(os.Args) > 5 && os.Args[5] == "dark" {
+		tt := mui.NewTester(a.View, 1440, 900)
+		tt.SetScale(2)
+		tt.SetDark(true)
+		tt.Frame()
+		img = tt.Image()
+	} else {
+		img = mui.Render(a.View, 1440, 900, 2)
+	}
 	f, err := os.Create(out)
 	if err != nil {
 		panic(err)

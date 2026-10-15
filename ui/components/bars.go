@@ -13,16 +13,16 @@ const (
 )
 
 // BarRow shows one labelled level: the label, a bar filled to pct (0–100)
-// and value text. A nil pct is unknown: an empty bar. Fills turn amber from
-// 75 and red from 90.
-func BarRow(c *ui.Context, label string, pct *float64, value string) ui.Element {
+// in tint (the page's metric colour) and value text. A nil pct is unknown:
+// an empty bar. Fills turn amber from 75 and red from 90.
+func BarRow(c *ui.Context, label string, pct *float64, value string, tint ui.Color) ui.Element {
 	t := c.Theme()
 	return ui.Row(c).Gap(Grid).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, label).FontSize(12).TextColor(t.TextMuted).Width(labelWidth).SingleLine()
 		track := ui.Box(c).Grow(1).Height(barHeight).Radius(barHeight / 2).Background(t.Border)
 		if pct != nil && finite(*pct) {
 			fill := min(max(*pct/100, 0), 1)
-			col := t.Accent
+			col := tint
 			switch {
 			case *pct >= 90:
 				col = t.Danger

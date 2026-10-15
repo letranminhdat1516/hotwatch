@@ -9,7 +9,7 @@ import "github.com/egoist/mygo/ui"
 // Layout metrics: an 8 DIP grid.
 const (
 	Grid       = 8
-	CardRadius = 12
+	CardRadius = 14
 	CardWidth  = 33 * Grid
 )
 
