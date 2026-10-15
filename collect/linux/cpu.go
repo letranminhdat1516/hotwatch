@@ -16,7 +16,7 @@ type cpuCounters struct {
 	cores []cpuLine
 }
 
-type cpuLine struct{ busy, total uint64 }
+type cpuLine struct{ busy, user, system, total uint64 }
 
 // sampleCPU fills cpu.Total/PerCore from the delta against the previous
 // sample. It returns false when the values are not fresh (first sample,
@@ -42,7 +42,8 @@ func (c *collector) sampleCPU(cpu *model.CPU) bool {
 			return c.carry(cpu)
 		}
 	}
-	cpu.Total, cpu.PerCore = total, cores
+	user, system := split(prev.total, cur.total)
+	cpu.Total, cpu.PerCore, cpu.User, cpu.System = total, cores, &user, &system
 	c.lastCPU, c.haveLast = *cpu, true
 	return true
 }
@@ -51,8 +52,23 @@ func (c *collector) carry(cpu *model.CPU) bool {
 	if c.haveLast {
 		cpu.Total = c.lastCPU.Total
 		cpu.PerCore = append([]float64(nil), c.lastCPU.PerCore...)
+		cpu.User, cpu.System = c.lastCPU.User, c.lastCPU.System
 	}
 	return false
+}
+
+// split is the user and system shares of the time between two readings, in
+// percent; a counter that went backwards counts as 0. Call it only after pct
+// accepted the same pair, so the elapsed time is positive.
+func split(prev, cur cpuLine) (user, system float64) {
+	dt := float64(cur.total - prev.total)
+	if cur.user >= prev.user {
+		user = float64(cur.user-prev.user) / dt * 100
+	}
+	if cur.system >= prev.system {
+		system = float64(cur.system-prev.system) / dt * 100
+	}
+	return user, system
 }
 
 // pct returns the busy percentage between two readings; ok is false when a
@@ -98,7 +114,8 @@ func readStat(path string) (cpuCounters, error) {
 }
 
 // parseCPULine reads user nice system idle iowait irq softirq steal ...;
-// busy = total - (idle + iowait). Guest times are already inside user/nice.
+// busy = total - (idle + iowait), user = user + nice (guest times are
+// already inside them), system = system + irq + softirq.
 func parseCPULine(f []string) (cpuLine, error) {
 	if len(f) < 5 {
 		return cpuLine{}, errors.New("short cpu line")
@@ -114,5 +131,12 @@ func parseCPULine(f []string) (cpuLine, error) {
 		vals[i] = v
 		total += v
 	}
-	return cpuLine{busy: total - vals[3] - vals[4], total: total}, nil
+	system := vals[2]
+	if n > 5 {
+		system += vals[5]
+	}
+	if n > 6 {
+		system += vals[6]
+	}
+	return cpuLine{busy: total - vals[3] - vals[4], user: vals[0] + vals[1], system: system, total: total}, nil
 }

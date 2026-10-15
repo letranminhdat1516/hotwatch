@@ -9,7 +9,7 @@ import (
 func TestOverviewCardsShowSubLabelsStatsAndAnalytics(t *testing.T) {
 	tt := render(pages.Overview, view(snap(), procs(), "darwin"))
 	has(t, tt,
-		"CPU", "Now", "Load 1m", "Load 5m", "Load 15m", "1.50",
+		"CPU", "Now", "User", "System", "Load 1m", "1.50",
 		"Memory", "In use of 16.0 GB", "App", "Wired", "Compressed", "Warning",
 		"Disk", "Reading", "Writing", "Written",
 		"Network", "Downloading", "Uploading", "Received", "Sent",

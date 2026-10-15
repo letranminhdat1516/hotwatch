@@ -21,6 +21,11 @@ type CPU struct {
 	Total   float64    `json:"total"`
 	PerCore []float64  `json:"perCore,omitempty"`
 	Load    [3]float64 `json:"load"`
+	// User and System split Total into time in user code and in the kernel,
+	// in percent of all CPU time; nil when the collector does not report
+	// them (agents older than this field).
+	User   *float64 `json:"user,omitempty"`
+	System *float64 `json:"system,omitempty"`
 }
 
 type Memory struct {

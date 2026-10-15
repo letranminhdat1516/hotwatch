@@ -60,7 +60,7 @@ func gpuVal(s model.Snapshot) float64 {
 func macSnap() *model.Snapshot {
 	return &model.Snapshot{
 		Time: time.Now(),
-		CPU:  model.CPU{Total: 32, PerCore: make([]float64, 10), Load: [3]float64{2.1, 1.8, 1.5}},
+		CPU:  model.CPU{Total: 32, PerCore: make([]float64, 10), Load: [3]float64{2.1, 1.8, 1.5}, User: fp(25), System: fp(7)},
 		Memory: model.Memory{Total: 24 << 30, Used: 19 << 30, App: 8 << 30, Wired: 3<<30 + 800<<20,
 			Compressed: 7 << 30, SwapTotal: 4 << 30, SwapUsed: 1 << 30, Pressure: "normal"},
 		Disks: []model.Volume{{Mount: "/", FS: "apfs", Total: 494 << 30, Used: 480 << 30, ReadBps: fp(573 << 10), WriteBps: fp(33 << 20)}},
@@ -75,7 +75,7 @@ func macSnap() *model.Snapshot {
 func boxSnap() *model.Snapshot {
 	return &model.Snapshot{
 		Time: time.Now(),
-		CPU:  model.CPU{Total: 71, PerCore: make([]float64, 16), Load: [3]float64{8.4, 7.1, 6.0}},
+		CPU:  model.CPU{Total: 71, PerCore: make([]float64, 16), Load: [3]float64{8.4, 7.1, 6.0}, User: fp(60), System: fp(11)},
 		Memory: model.Memory{Total: 62 << 30, Used: 41 << 30, App: 36 << 30, Wired: 4 << 30,
 			Cached: 10 << 30, SwapTotal: 8 << 30, SwapUsed: 0, Pressure: "normal"},
 		Disks: []model.Volume{{Mount: "/", FS: "ext4", Total: 2 << 40, Used: 900 << 30, ReadBps: fp(12 << 20), WriteBps: fp(4 << 20)}},

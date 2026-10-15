@@ -11,7 +11,7 @@ import (
 	"hotwatch/model"
 )
 
-type cpuLine struct{ busy, total float64 }
+type cpuLine struct{ busy, user, system, total float64 }
 
 type cpuCounters struct {
 	total cpuLine
@@ -20,9 +20,12 @@ type cpuCounters struct {
 
 func toLine(t cpu.TimesStat) cpuLine {
 	// busy is summed from its parts rather than total-idle: the difference of
-	// two large floats can jitter backwards on an idle core.
-	busy := t.User + t.System + t.Nice + t.Irq + t.Softirq + t.Steal + t.Guest + t.GuestNice
-	return cpuLine{busy: busy, total: busy + t.Idle + t.Iowait}
+	// two large floats can jitter backwards on an idle core. user is time in
+	// user code (nice and guest included), system the kernel's share.
+	user := t.User + t.Nice + t.Guest + t.GuestNice
+	system := t.System + t.Irq + t.Softirq + t.Steal
+	busy := user + system
+	return cpuLine{busy: busy, user: user, system: system, total: busy + t.Idle + t.Iowait}
 }
 
 // readCPU reads per-core ticks once and derives the aggregate from them, so
@@ -41,6 +44,8 @@ func readCPU(ctx context.Context) (cpuCounters, error) {
 		l := toLine(t)
 		out.cores[i] = l
 		out.total.busy += l.busy
+		out.total.user += l.user
+		out.total.system += l.system
 		out.total.total += l.total
 	}
 	return out, nil
@@ -69,7 +74,8 @@ func (c *collector) sampleCPU(ctx context.Context, out *model.CPU) bool {
 			return c.carry(out)
 		}
 	}
-	out.Total, out.PerCore = total, cores
+	user, system := split(prev.total, cur.total)
+	out.Total, out.PerCore, out.User, out.System = total, cores, &user, &system
 	c.lastCPU, c.haveLast = *out, true
 	return true
 }
@@ -78,8 +84,17 @@ func (c *collector) carry(out *model.CPU) bool {
 	if c.haveLast {
 		out.Total = c.lastCPU.Total
 		out.PerCore = append([]float64(nil), c.lastCPU.PerCore...)
+		out.User, out.System = c.lastCPU.User, c.lastCPU.System
 	}
 	return false
+}
+
+// split is the user and system shares of the time between two readings, in
+// percent, clamped at 0 against counter jitter. Call it only after pct
+// accepted the same pair, so the elapsed time is positive.
+func split(prev, cur cpuLine) (user, system float64) {
+	dt := cur.total - prev.total
+	return max(0, (cur.user-prev.user)/dt*100), max(0, (cur.system-prev.system)/dt*100)
 }
 
 // pct returns the busy percentage between two readings; ok is false when a

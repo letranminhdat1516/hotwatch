@@ -160,12 +160,13 @@ func overviewExtras(c *ui.Context, v hub.HostView) {
 				ui.Text(c, format.Bytes(sum)+" in all").FontSize(12).TextColor(t.TextMuted).SingleLine()
 			})
 			ui.Column(c).Gap(g - 2).Children(func() {
-				for _, a := range apps {
+				for i, a := range apps {
 					fill := float32(0)
 					if maxRSS > 0 {
 						fill = float32(a.rss) / float32(maxRSS)
 					}
-					ui.Row(c).Key(a.name).Gap(g).AlignItems(ui.Center).Children(func() {
+					// Keyed by rank, not name: two bundles can share a display name.
+					ui.Row(c).Key(fmt.Sprintf("app-%d", i)).Gap(g).AlignItems(ui.Center).Children(func() {
 						ui.Text(c, a.name).FontSize(12).TextColor(t.Text).Width(16 * g).SingleLine()
 						ui.Box(c).Grow(1).Height(8).Radius(4).Background(t.Border).Draw(func(p *ui.Painter, r ui.Rect) {
 							if fill > 0 {
@@ -257,12 +258,16 @@ func cards(v hub.HostView, now time.Time) []card {
 	var out []card
 
 	cpu := card{key: "cpu", icon: icons.CPU, title: "CPU", sub: "Now", value: format.Unknown, unit: "%",
-		stats: unknown3("Load 1m", "Load 5m", "Load 15m"), series: "cpu", pctScale: true}
+		stats: unknown3("User", "System", "Load 1m"), series: "cpu", pctScale: true}
 	if !partial(s, "cpu") {
 		cpu.value = format.Number(ptr(s.CPU.Total))
-		for i := range cpu.stats {
-			cpu.stats[i].value = fmt.Sprintf("%.2f", s.CPU.Load[i])
+		if n := format.Number(s.CPU.User); n != format.Unknown {
+			cpu.stats[0].value = n + "%"
 		}
+		if n := format.Number(s.CPU.System); n != format.Unknown {
+			cpu.stats[1].value = n + "%"
+		}
+		cpu.stats[2].value = fmt.Sprintf("%.2f", s.CPU.Load[0])
 	}
 	out = append(out, cpu)
 
