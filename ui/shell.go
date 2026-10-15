@@ -223,10 +223,11 @@ func (a *App) navRow(c *ui.Context, p Page, v hub.HostView) {
 	if selected {
 		label, value = ink, ink.Alpha(0.8)
 	}
+	// A tinted tile with the line icon in the metric's colour.
 	tileBg := t.SurfaceHover
 	iconCol := t.TextMuted
 	if col, ok := components.MetricColor(p.Key); ok {
-		tileBg, iconCol = col, ui.Hex("#ffffff")
+		tileBg, iconCol = col.Alpha(0.18), col
 	}
 	if selected {
 		tileBg = ink.Alpha(0.18)

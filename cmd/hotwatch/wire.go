@@ -549,7 +549,8 @@ func (c *core) attach(app appUI, warn store.Warning) {
 	app.SetHostPanel(hostpanel.New(cfg, c.effects()))
 	app.SetPost(c.post)
 	app.SetIconSource(appicon.NewDarwin(c.post, 40))
-	app.SetSymbolSource(symbols.New())
+	// The chrome draws hotwatch's own Lucide line icons, not SF Symbols:
+	// its look is its own (owner's request, 2026-10-15).
 	app.SetApps(c.apps, c.openBundle, c.revealBundle)
 	app.SetPackages(c.pkgs)
 	app.SetLogsOpener(c.openLogs)
