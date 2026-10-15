@@ -27,6 +27,7 @@ import (
 	"hotwatch/docker"
 	"hotwatch/hub"
 	"hotwatch/internal/sshtest"
+	"hotwatch/mac/appicon"
 	"hotwatch/model"
 	"hotwatch/source"
 	"hotwatch/store"
@@ -129,6 +130,7 @@ func (a *fakeApp) CloseLogs()                                 { a.closed++ }
 func (a *fakeApp) SetHostPanel(p hwui.HostPanel)              { a.panel = p }
 func (a *fakeApp) SetPost(p func(func()))                     { a.post = p }
 func (a *fakeApp) SetLogsOpener(o pages.LogsOpener)           { a.logs = o }
+func (a *fakeApp) SetIconSource(appicon.Source)               {}
 func (a *fakeApp) SetColumnsHook(f func(string, []string))    { a.colHook = f }
 func (a *fakeApp) SetSavedColumns(page string, cols []string) { a.columns[page] = cols }
 func (a *fakeApp) SetFrameHook(f func(time.Time))             { a.frameHook = f }
@@ -184,7 +186,7 @@ func (h *fakeHub) SetVisible(ids []string) {
 	h.visible = slices.Clone(ids)
 	h.mu.Unlock()
 }
-func (h *fakeHub) Stop()                        { h.rec("stop", "") }
+func (h *fakeHub) Stop()                       { h.rec("stop", "") }
 func (h *fakeHub) SetInterval(d time.Duration) { h.rec("interval", d.String()) }
 func (h *fakeHub) got() []hubCall {
 	h.mu.Lock()

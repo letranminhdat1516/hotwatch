@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"hotwatch/hub"
+	"hotwatch/mac/appicon"
 	"hotwatch/model"
 	"hotwatch/source"
 	"hotwatch/source/remote"
@@ -447,6 +448,7 @@ type appUI interface {
 	CloseLogs()
 	SetHostPanel(p hwui.HostPanel)
 	SetPost(post func(func()))
+	SetIconSource(src appicon.Source)
 	SetLogsOpener(o pages.LogsOpener)
 	SetColumnsHook(f func(page string, cols []string))
 	SetSavedColumns(page string, cols []string)
@@ -531,6 +533,7 @@ func (c *core) attach(app appUI, warn store.Warning) {
 	cfg := c.cfg.Config()
 	app.SetHostPanel(hostpanel.New(cfg, c.effects()))
 	app.SetPost(c.post)
+	app.SetIconSource(appicon.NewDarwin(c.post, 40))
 	app.SetLogsOpener(c.openLogs)
 	app.SetColumnsHook(c.cfg.SetColumns)
 	for page, cols := range cfg.Settings.Columns {

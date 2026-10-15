@@ -636,6 +636,13 @@ func procCell(c *ui.Context, pr *model.Process, id string, now time.Time) {
 	if (id == "cpu" && pr.CPUPct >= 50) || (id == "mem" && pr.RSS >= 2<<30) {
 		col = c.Theme().Warning
 	}
+	if id == "name" {
+		ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
+			appIcon(c, pr.Name, pr.AppBundle)
+			ui.Text(c, s).FontSize(13).TextColor(col).SingleLine()
+		})
+		return
+	}
 	ui.Text(c, s).FontSize(13).TextColor(col).SingleLine()
 }
 

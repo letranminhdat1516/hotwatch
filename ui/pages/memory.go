@@ -113,9 +113,10 @@ func Memory(c *ui.Context, v hub.HostView, now time.Time) {
 // app is the processes of one application bundle (or of one executable name
 // when it has no bundle) and their combined resident memory.
 type app struct {
-	name  string
-	procs int
-	rss   uint64
+	name   string
+	bundle string // "" for a plain executable
+	procs  int
+	rss    uint64
 }
 
 // byApp groups processes by AppBundle, falling back to Name, and returns the
@@ -137,7 +138,7 @@ func byApp(ps []model.Process) []app {
 		if !ok {
 			i = len(apps)
 			idx[key] = i
-			apps = append(apps, app{name: name})
+			apps = append(apps, app{name: name, bundle: p.AppBundle})
 		}
 		apps[i].procs++
 		apps[i].rss += p.RSS

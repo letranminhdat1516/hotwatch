@@ -13,6 +13,7 @@ import (
 	mui "github.com/egoist/mygo/ui"
 
 	"hotwatch/hub"
+	"hotwatch/mac/appicon"
 	"hotwatch/model"
 	"hotwatch/store"
 	hwui "hotwatch/ui"
@@ -80,9 +81,9 @@ func boxSnap() *model.Snapshot {
 		CPU:  model.CPU{Total: 71, PerCore: make([]float64, 16), Load: [3]float64{8.4, 7.1, 6.0}, User: fp(60), System: fp(11)},
 		Memory: model.Memory{Total: 62 << 30, Used: 41 << 30, App: 36 << 30, Wired: 4 << 30,
 			Cached: 10 << 30, SwapTotal: 8 << 30, SwapUsed: 0, Pressure: "normal"},
-		Disks: []model.Volume{{Mount: "/", FS: "ext4", Total: 2 << 40, Used: 900 << 30, ReadBps: fp(12 << 20), WriteBps: fp(4 << 20)}},
-		Net:   []model.Interface{{Name: "eth0", Addrs: []string{"100.73.66.67"}, Up: true, RxBps: fp(3 << 20), TxBps: fp(900 << 10)}},
-		GPUs:  []model.GPU{{Name: "RTX 3080", UtilPct: fp(63), MemUsed: up(7 << 30), MemTotal: up(10 << 30)}},
+		Disks:  []model.Volume{{Mount: "/", FS: "ext4", Total: 2 << 40, Used: 900 << 30, ReadBps: fp(12 << 20), WriteBps: fp(4 << 20)}},
+		Net:    []model.Interface{{Name: "eth0", Addrs: []string{"100.73.66.67"}, Up: true, RxBps: fp(3 << 20), TxBps: fp(900 << 10)}},
+		GPUs:   []model.GPU{{Name: "RTX 3080", UtilPct: fp(63), MemUsed: up(7 << 30), MemTotal: up(10 << 30)}},
 		Uptime: 19 * 24 * time.Hour,
 	}
 }
@@ -148,6 +149,13 @@ func main() {
 	a := hwui.NewApp(func(id string) hub.HostView { return views[id] }, hosts, nil, func(string, string) {})
 	a.SelectForShot(sel, page)
 	a.SetSettings(store.Settings{IntervalMs: 2000})
+	if sel == "local" {
+		// Real icons: deliveries run inline, so one warm-up render queues the
+		// loads and a short wait lets AppKit answer before the real render.
+		a.SetIconSource(appicon.NewDarwin(func(f func()) { f() }, 40))
+		mui.Render(a.View, 1440, 900, 1)
+		time.Sleep(1500 * time.Millisecond)
+	}
 
 	var img image.Image
 	if len(os.Args) > 5 && os.Args[5] == "dark" {

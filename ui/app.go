@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"hotwatch/hub"
+	"hotwatch/mac/appicon"
 	"hotwatch/store"
 	"hotwatch/ui/components"
 	"hotwatch/ui/pages"
@@ -159,6 +160,10 @@ func (a *App) SetSettings(s store.Settings) { a.settings = s }
 // SetSettingsHook sets the function called with the new settings when the
 // user changes one; the caller persists and applies them.
 func (a *App) SetSettingsHook(f func(store.Settings)) { a.onSettings = f }
+
+// SetIconSource installs where the pages get application icons (main
+// thread); nil leaves every application on its initials tile.
+func (a *App) SetIconSource(src appicon.Source) { pages.SetIconSource(src) }
 
 func (a *App) changeSettings(s store.Settings) {
 	a.settings = s

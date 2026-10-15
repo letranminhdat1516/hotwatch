@@ -168,7 +168,8 @@ func overviewExtras(c *ui.Context, v hub.HostView) {
 					}
 					// Keyed by rank, not name: two bundles can share a display name.
 					ui.Row(c).Key(fmt.Sprintf("app-%d", i)).Gap(g).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, a.name).FontSize(12).TextColor(t.Text).Width(16 * g).SingleLine()
+						appIcon(c, a.name, a.bundle)
+						ui.Text(c, a.name).FontSize(12).TextColor(t.Text).Width(13 * g).SingleLine()
 						ui.Box(c).Grow(1).Height(8).Radius(4).Background(t.Border).Draw(func(p *ui.Painter, r ui.Rect) {
 							if fill > 0 {
 								p.Fill(ui.Rect{X: r.X, Y: r.Y, W: max(r.W*fill, 8), H: r.H}, barTint, 4)
