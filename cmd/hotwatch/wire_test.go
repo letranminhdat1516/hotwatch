@@ -459,7 +459,7 @@ func TestIntervalDefaults(t *testing.T) {
 	c := store.Default()
 	c.Settings.IntervalMs = 0
 	w := newCore(c, testPaths(t), store.NewMemSecrets(), localFake, func(f func()) { f() }, slog.New(slog.DiscardHandler))
-	if w.interval() != 2*time.Second {
+	if w.interval() != time.Second {
 		t.Fatalf("interval %v", w.interval())
 	}
 	c.Settings.IntervalMs = 5000
