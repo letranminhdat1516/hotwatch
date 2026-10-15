@@ -29,6 +29,11 @@ func Sparkline(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float
 	return dotMatrix(c, [][]hub.Point{pts}, from, to, ceiling, tint, chartH)
 }
 
+// MiniDots is a dot matrix of height for small tiles, such as the nook's.
+func MiniDots(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
+	return dotMatrix(c, [][]hub.Point{pts}, from, to, ceiling, tint, height)
+}
+
 // DotChart is a taller dot matrix with a time axis under it, for a page's
 // main chart.
 func DotChart(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {
