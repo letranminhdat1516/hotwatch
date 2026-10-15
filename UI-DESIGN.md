@@ -128,7 +128,63 @@ colour. No lines, no gradients.
   each container once; show the boot container on the card, all on the
   Disk page.
 
+## Page references (captured from the running reference app, 2026-10-15)
+
+What each page shows, as a checklist for the per-page passes. Figures in
+quotes are the reference's labels; hotwatch reimplements the content with
+its own code and only where it has the data (gaps listed at the end).
+
+- **Page header**: title 22/700 with a one-line subtitle under it
+  ("Battery and power", "623 processes · 5,027 threads", "31 apps ·
+  21.8 GB · 1 update"); top-right: the chart window segmented control
+  `1m · 5m · 15m · 1h`, a pause toggle and a settings (gear) button.
+- **Energy**: card *Battery* — donut with "82%" and "On Battery" in the
+  centre, a "✓ Normal" badge top-right, six stats in a 3×2 grid each with a
+  value and a muted sub-line: Remaining 4h 14m · Battery Flow 18.4 W
+  "discharging" · Health 96% "of design capacity" · Cycles 92 · Capacity
+  6,012 mAh "design 6,249" · Adapter None. Card *Power* — sub-label "The
+  whole computer draws", headline 18.4 W, stats Processes · Average ·
+  Peak · Thermal "Nominal / Cool", then a full-width dot chart with a time
+  axis (−1m · −45s · −30s · −15s · now). Row: *Energy by App* (app icon,
+  name, W/mW right-aligned, thin bar; header right "3.00 W in all") and
+  *Temperatures* (Processor "hottest 57 °C", Storage, Battery: bar + °C).
+- **Processes**: search field; filter segmented All · Apps · My Processes
+  · System; toolbar (tree, end process, inspector). Columns: Name (app
+  icon, disclosure for groups, child-count badge), % CPU (sorted, high
+  values in orange), Memory (orange when high), Power, Threads, CPU Time,
+  PID, User. Footer: "364 of 623 processes · 181 of other users estimated"
+  left; totals right "CPU 30% · Memory 20.6 GB · Power 18.4 W".
+- **Apps**: tabs Apps · Homebrew · mise; columns Name (icon, running dot),
+  Version (update shown as "1.49.2 → 1.53.0"), Size, Kind (Universal /
+  Apple silicon / Intel), Last Opened, Source (App Store / Homebrew / –).
+  Inspector on the right: icon, name, bundle id, description, a primary
+  "Update to 1.53.0", Open · Uninstall · reveal, a Details table (Version,
+  Newest, Size, Kind, Added, Last opened, Updates, Cask, Installed, Tap,
+  Homepage) and Path. Footer: "Checked Yesterday · 1 update · Update All".
+- **About This Mac**: hero card (device picture, model name 32/700,
+  "Apple M5 · 24.0 GB", pills for the OS version and uptime), then 2×2
+  cards: Hardware (Model, Model identifier, Chip, CPU cores "10 (4
+  Performance, 6 Efficiency)", GPU cores, Memory, Architecture, Serial),
+  Software (System, Build, Kernel, Computer name, Started, Uptime,
+  Processes, Go), Displays (resolution @2x), Storage ("13.5 GB free of
+  494 GB").
+- **Settings** (popover from the gear): Update every 0.5 s · 1 s · 2 s ·
+  5 s; Network speeds in Bytes/s · Bits/s; Menu bar shows (dropdown);
+  Language (Same as System); a shortcuts hint; Check for Updates…; Send
+  Feedback….
+- **Sidebar**: as built, plus the process count on Processes; the bottom
+  block reads "MacBook Pro / Apple M5 · Up 28d 5h".
+
+Data hotwatch does not collect yet (never faked; the card or stat is
+omitted until a collector reports it): battery cycles, design/actual
+capacity, health and adapter (IOKit AppleSmartBattery); per-process power
+and the whole-computer draw on battery-less hosts; CPU, storage and
+battery temperatures (SMC / IOHID); CPU performance/efficiency core split,
+GPU core count, model identifier and serial (sysctl, IOKit); app icons;
+Homebrew and mise inventories (F2); the hardware pages' references (CPU,
+Memory, GPU, Disk, Network) are still to be captured.
+
 ## Out of scope for this pass
 
-Per-page redesigns (CPU, Memory, …) follow the same tokens and card anatomy
-later; this pass is the shell, the Overview and the two data fixes.
+Per-page redesigns follow the same tokens, the card anatomy above and the
+page references; this pass was the shell, the Overview and the data fixes.
