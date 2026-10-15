@@ -109,7 +109,7 @@ func overviewCard(c *ui.Context, cd card, pts []hub.Point, now time.Time) {
 			if cd.pctScale {
 				ceiling = 100
 			}
-			components.Sparkline(c, pts, now.Add(-components.ChartWindow), now, ceiling, tint).Margin(g, 0, 0, 0)
+			components.Sparkline(c, pts, now.Add(-components.ChartWindow()), now, ceiling, tint).Margin(g, 0, 0, 0)
 		}
 	})
 }
@@ -251,7 +251,7 @@ func pressureBadge(level string) (text, tone string) {
 // v.Hist when it has them.
 func cards(v hub.HostView, now time.Time) []card {
 	s := v.Snap
-	from := now.Add(-components.ChartWindow)
+	from := now.Add(-components.ChartWindow())
 	unknown3 := func(a, b, c string) [3]stat {
 		return [3]stat{{a, format.Unknown}, {b, format.Unknown}, {c, format.Unknown}}
 	}

@@ -48,13 +48,20 @@ type App struct {
 	tabKeys      []string
 	split        float32 // content width
 	hostMenuOpen bool
+
+	// Chart window (an index into windows) and pause: while paused, views
+	// are held back and now() stands still, so every page freezes.
+	windowIdx int
+	paused    bool
+	clock     func() time.Time        // the running clock while paused
+	held      map[string]hub.HostView // newest view per host received while paused
 }
 
 // NewApp seeds the per-host state from views(id) for each host. The first host
 // is selected and the Overview page shown.
 func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.Runner, onSelect func(hostID, page string)) *App {
 	a := &App{hosts: slices.Clone(hosts), actions: actions, onSelect: onSelect, page: "overview",
-		views: map[string]hub.HostView{}, now: time.Now,
+		views: map[string]hub.HostView{}, held: map[string]hub.HostView{}, now: time.Now, windowIdx: 1,
 		acts: pages.NewActions(actions), procs: pages.NewProcesses(), docker: pages.NewDocker()}
 	a.procs.OnColumns = func(cols []string) {
 		if a.onColumns != nil {
@@ -79,8 +86,44 @@ func (a *App) SelectForShot(hostID, page string) {
 
 // Apply stores a copy of v for host id. Call it on the main thread.
 func (a *App) Apply(id string, v hub.HostView) {
+	if a.paused {
+		a.held[id] = copyView(v) // shown on resume
+		return
+	}
 	a.views[id] = copyView(v)
 	a.gen++
+}
+
+// windows are the chart windows the page header offers, in order.
+var (
+	windows      = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, time.Hour}
+	windowLabels = []string{"1m", "5m", "15m", "1h"}
+)
+
+// Window is how far back the charts look.
+func (a *App) Window() time.Duration { return windows[min(max(a.windowIdx, 0), len(windows)-1)] }
+
+// Paused reports whether updates are held back.
+func (a *App) Paused() bool { return a.paused }
+
+// togglePause freezes the window: views stop changing and now() stands
+// still at the pause instant, so charts stop too. Resuming shows the newest
+// view held for each host and lets the clock run again.
+func (a *App) togglePause() {
+	if a.paused {
+		a.paused = false
+		a.now = a.clock
+		for id, v := range a.held {
+			a.views[id] = v
+			delete(a.held, id)
+		}
+		a.gen++
+		return
+	}
+	a.paused = true
+	a.clock = a.now
+	frozen := a.clock()
+	a.now = func() time.Time { return frozen }
 }
 
 // ApplyAction records an action snapshot published by the runner, keeping

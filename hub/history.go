@@ -7,8 +7,9 @@ import (
 	"hotwatch/model"
 )
 
-// HistoryLen is the number of points kept per series.
-const HistoryLen = 600
+// HistoryLen is the number of points kept per series: an hour at the
+// default two-second interval, the longest chart window.
+const HistoryLen = 1800
 
 // Point is one sample of a series.
 type Point struct {

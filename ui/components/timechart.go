@@ -13,8 +13,53 @@ import (
 	"hotwatch/ui/format"
 )
 
-// ChartWindow is how far back a TimeChart looks.
-const ChartWindow = 5 * time.Minute
+// chartWindow is how far back charts look. The page header's 1m · 5m · 15m
+// · 1h control sets it through the App; it is read and written on the main
+// thread only, where every frame is built.
+var chartWindow = 5 * time.Minute
+
+// ChartWindow is how far back charts look.
+func ChartWindow() time.Duration { return chartWindow }
+
+// SetChartWindow changes how far back charts look; values that are not
+// positive are ignored.
+func SetChartWindow(d time.Duration) {
+	if d > 0 {
+		chartWindow = d
+	}
+}
+
+// xTicksFor divides window into even steps labelled by their distance from
+// the right edge ("−45s", "−3m", "−1h"), ending in "now": four steps, or
+// five when the window is a multiple of five minutes under an hour.
+func xTicksFor(window time.Duration) []chart.Tick {
+	divisions := 4
+	if window%(5*time.Minute) == 0 && window < time.Hour {
+		divisions = 5
+	}
+	ticks := make([]chart.Tick, 0, divisions+1)
+	for i := 0; i <= divisions; i++ {
+		label := "now"
+		if i < divisions {
+			label = "−" + shortDuration(window-window*time.Duration(i)/time.Duration(divisions))
+		}
+		ticks = append(ticks, chart.Tick{At: float32(i) / float32(divisions), Label: label})
+	}
+	return ticks
+}
+
+// shortDuration is "2h", "15m", "45s" or "1m30s".
+func shortDuration(d time.Duration) string {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	case d >= time.Minute && d%time.Minute == 0:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm%02ds", int(d/time.Minute), int(d%time.Minute/time.Second))
+	}
+	return fmt.Sprintf("%ds", int(d/time.Second))
+}
 
 // SeriesColors are the line colours: the accent, then the colours of the
 // second and later series.
@@ -73,7 +118,8 @@ func latest(pts []hub.Point, from time.Time) (float64, bool) {
 // span 0 to a round value above the largest point.
 func TimeChart(c *ui.Context, title, unit string, series map[string][]hub.Point, now time.Time) ui.Element {
 	t := c.Theme()
-	from := now.Add(-ChartWindow)
+	window := ChartWindow()
+	from := now.Add(-window)
 	names := make([]string, 0, len(series))
 	for n := range series {
 		names = append(names, n)
@@ -98,14 +144,7 @@ func TimeChart(c *ui.Context, title, unit string, series map[string][]hub.Point,
 	}
 	y, yTicks := yScale(unit, hi)
 	at := func(v float64) float32 { return y.At(v) }
-	var xTicks []chart.Tick
-	for m := 5; m >= 0; m-- {
-		label := fmt.Sprintf("−%dm", m)
-		if m == 0 {
-			label = "now"
-		}
-		xTicks = append(xTicks, chart.Tick{At: float32(5-m) / 5, Label: label})
-	}
+	xTicks := xTicksFor(window)
 	axisLabel := func(side chart.Side, tick chart.Tick) {
 		ui.Text(c, tick.Label).NoWrap().FontSize(11).TextColor(t.TextMuted)
 	}
@@ -134,7 +173,7 @@ func TimeChart(c *ui.Context, title, unit string, series map[string][]hub.Point,
 						p.Line(r.X, chart.Y(r, tick.At), r.X+r.W, chart.Y(r, tick.At), 1, t.Border)
 					}
 					for i, n := range names {
-						xs, ys := plotPoints(series[n], from, at)
+						xs, ys := plotPoints(series[n], from, window, at)
 						if len(xs) == 0 {
 							continue
 						}
@@ -151,12 +190,12 @@ func TimeChart(c *ui.Context, title, unit string, series map[string][]hub.Point,
 
 // plotPoints maps the points at or after from to plot fractions; a
 // non-finite value breaks the line.
-func plotPoints(pts []hub.Point, from time.Time, at func(float64) float32) (xs, ys []float32) {
+func plotPoints(pts []hub.Point, from time.Time, window time.Duration, at func(float64) float32) (xs, ys []float32) {
 	for _, p := range pts {
 		if p.T.Before(from) {
 			continue
 		}
-		xs = append(xs, float32(p.T.Sub(from).Seconds()/ChartWindow.Seconds()))
+		xs = append(xs, float32(p.T.Sub(from).Seconds()/window.Seconds()))
 		v := float32(math.NaN())
 		if finite(p.V) {
 			v = min(max(at(p.V), 0), 1)

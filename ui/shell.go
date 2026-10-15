@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -84,6 +85,7 @@ func Shell(c *ui.Context, a *App, content func()) {
 	}
 	v := a.views[a.selected]
 	now := a.now()
+	components.SetChartWindow(a.Window())
 
 	// a.page is the single source of truth: sidebar rows and shortcuts both
 	// call setPage; a.tab is derived below for anything that still reads it.
@@ -107,7 +109,16 @@ func Shell(c *ui.Context, a *App, content func()) {
 		ui.Column(c).Grow(1).Background(t.Background).Children(func() {
 			ui.Scroll(c).Fill().Children(func() {
 				ui.Column(c).Padding(3*components.Grid).Gap(2*components.Grid).Children(func() {
-					ui.Text(c, title).FontSize(22).FontWeight(700)
+					ui.Row(c).AlignItems(ui.Center).Gap(2*components.Grid).Children(func() {
+						ui.Column(c).Grow(1).Gap(2).Children(func() {
+							ui.Text(c, title).FontSize(22).FontWeight(700)
+							if sub := pageSubtitle(a.page, v); sub != "" {
+								ui.Text(c, sub).FontSize(12).TextColor(t.TextMuted).SingleLine()
+							}
+						})
+						ui.Segmented(c, &a.windowIdx, windowLabels...)
+						a.pauseButton(c)
+					})
 					a.noticeBanner(c)
 					if kind, text, ok := banner(v.Conn, now); ok {
 						ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
@@ -383,4 +394,95 @@ func banner(conn hub.Conn, now time.Time) (components.BannerKind, string, bool) 
 		return components.BannerError, "Host key changed · possible attack; remove the old key from known_hosts by hand", true
 	}
 	return 0, "", false
+}
+
+// pageSubtitle is the muted line under the page title: a figure about the
+// page's subject when the host has one.
+func pageSubtitle(page string, v hub.HostView) string {
+	s := v.Snap
+	switch page {
+	case "overview":
+		return v.Info.Hostname
+	case "processes":
+		if n := len(v.Procs); n > 0 {
+			threads := 0
+			for _, p := range v.Procs {
+				threads += int(p.Threads)
+			}
+			sub := plural(n, "process")
+			if threads > 0 {
+				sub += " · " + plural(threads, "thread")
+			}
+			return sub
+		}
+	case "cpu":
+		if s != nil && len(s.CPU.PerCore) > 0 {
+			return plural(len(s.CPU.PerCore), "core")
+		}
+	case "memory":
+		if s != nil && s.Memory.Total > 0 {
+			return "In use of " + format.Bytes(s.Memory.Total)
+		}
+	case "gpu":
+		if s != nil && len(s.GPUs) > 0 {
+			return s.GPUs[0].Name
+		}
+	case "disk":
+		if s != nil && len(s.Disks) > 0 {
+			return plural(len(s.Disks), "volume")
+		}
+	case "network":
+		if s != nil {
+			up := 0
+			for _, i := range s.Net {
+				if i.Up && i.Name != "lo" && i.Name != "lo0" {
+					up++
+				}
+			}
+			if up > 0 {
+				return plural(up, "interface") + " up"
+			}
+		}
+	case "energy":
+		return "Battery and power"
+	case "docker":
+		if n := len(v.Ctrs); n > 0 {
+			return plural(n, "container")
+		}
+	}
+	return ""
+}
+
+// plural counts noun: "1 core", "8 cores", "2 processes".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	if strings.HasSuffix(noun, "s") {
+		return fmt.Sprintf("%d %ses", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// pauseButton toggles holding updates back; it shows a play glyph and a
+// warning tint while paused.
+func (a *App) pauseButton(c *ui.Context) {
+	t := c.Theme()
+	icon, tip := icons.Pause, "Pause updates"
+	if a.paused {
+		icon, tip = icons.Play, "Resume updates"
+	}
+	b := ui.Row(c).Key("pause").Size(28, 28).Radius(components.Grid).Center().Label(tip).Tooltip(tip)
+	switch {
+	case a.paused:
+		b.Background(t.Warning.Alpha(0.16))
+	case b.Hovered():
+		b.Background(t.SurfaceHover)
+	}
+	if b.Clicked() {
+		a.togglePause()
+	}
+	b.Children(func() {
+		ui.Icon(c, icon).FontSize(14).TextColor(t.Text)
+	})
 }

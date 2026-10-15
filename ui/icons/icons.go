@@ -38,4 +38,6 @@ var (
 
 	ChevronDown = load("chevron-down")
 	ChevronRight = load("chevron-right")
+	Pause        = load("pause")
+	Play         = load("play")
 )
