@@ -3,6 +3,7 @@ package pages
 import (
 	"runtime"
 	"runtime/debug"
+	"slices"
 
 	"github.com/egoist/mygo/ui"
 
@@ -14,6 +15,8 @@ var (
 	intervalMs     = []int{500, 1000, 2000, 5000}
 	unitLabels     = []string{"Bytes/s", "Bits/s"}
 	nookLabels     = []string{"Show", "Hide"}
+	lookLabels     = []string{"System", "Light", "Dark"}
+	lookValues     = []string{"", "light", "dark"}
 )
 
 // nearestInterval is the index of the option closest to ms.
@@ -40,17 +43,22 @@ func abs(n int) int {
 // would never see it.
 type SettingsState struct {
 	interval, units, nook int
+	look                  int
 	syncedMs              int
 	syncedUnits           string
 	syncedNookOff         bool
+	syncedLook            string
 	init                  bool
 }
 
 // sync points the controls at s when the settings changed elsewhere.
 func (st *SettingsState) sync(s store.Settings) {
-	if st.init && st.syncedMs == s.IntervalMs && st.syncedUnits == s.NetUnits && st.syncedNookOff == s.NookOff {
+	if st.init && st.syncedMs == s.IntervalMs && st.syncedUnits == s.NetUnits && st.syncedNookOff == s.NookOff &&
+		st.syncedLook == s.Appearance {
 		return
 	}
+	st.look = max(slices.Index(lookValues, s.Appearance), 0)
+	st.syncedLook = s.Appearance
 	st.nook = 0
 	if s.NookOff {
 		st.nook = 1
@@ -73,6 +81,16 @@ func Settings(c *ui.Context, st *SettingsState, s store.Settings, set func(store
 	t := c.Theme()
 	st.sync(s)
 	pageColumn(c, func() {
+		section(c, "Appearance", func() {
+			ui.Text(c, "Light or dark").FontSize(12).TextColor(t.TextMuted)
+			ui.Row(c).Children(func() { ui.Segmented(c, &st.look, lookLabels...) })
+			if v := lookValues[st.look]; v != s.Appearance {
+				s.Appearance, st.syncedLook = v, v
+				set(s)
+				c.Invalidate()
+			}
+			note(c, "System follows macOS. The button beside Pause in the header switches it too.")
+		})
 		section(c, "Updates", func() {
 			ui.Text(c, "Update every").FontSize(12).TextColor(t.TextMuted)
 			ui.Row(c).Children(func() { ui.Segmented(c, &st.interval, intervalLabels...) })

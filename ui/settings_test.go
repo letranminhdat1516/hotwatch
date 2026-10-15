@@ -74,3 +74,30 @@ func TestSettingsTurnsTheNookOff(t *testing.T) {
 		t.Fatalf("hook calls %+v, want one with NookOff", got)
 	}
 }
+
+func TestAppearanceButtonCyclesAndPersists(t *testing.T) {
+	app := testApp(hub.HostView{Snap: &model.Snapshot{}})
+	var got []store.Settings
+	app.SetSettings(store.Settings{IntervalMs: 1000})
+	app.SetSettingsHook(func(s store.Settings) { got = append(got, s) })
+	var dark bool
+	tt := ui.NewTester(func(c *ui.Context) {
+		app.View(c)
+		dark = c.Theme().Dark
+	}, 1200, 800)
+	tt.Frame()
+	for _, step := range []struct{ click, want string }{
+		{"Appearance: System", "light"}, {"Appearance: Light", "dark"}, {"Appearance: Dark", ""},
+	} {
+		if err := tt.Click(step.click); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if n := len(got); n == 0 || got[n-1].Appearance != step.want {
+			t.Fatalf("after %q the setting is %+v, want %q", step.click, got, step.want)
+		}
+		if step.want == "light" && dark || step.want == "dark" && !dark {
+			t.Fatalf("appearance %q but the frame's theme dark=%v", step.want, dark)
+		}
+	}
+}

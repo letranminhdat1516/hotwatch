@@ -48,6 +48,8 @@ type Settings struct {
 	Columns       map[string][]string `json:"columns,omitempty"`
 	LaunchAtLogin bool                `json:"launchAtLogin"`
 	NookOff       bool                `json:"nookOff,omitempty"` // hide the notch bar and island
+	// Appearance is "light" or "dark" to override the system's; "" follows it.
+	Appearance string `json:"appearance,omitempty"`
 }
 
 type UIState struct {

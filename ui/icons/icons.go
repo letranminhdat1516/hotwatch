@@ -59,6 +59,9 @@ var (
 	Swap         = load("arrow-left-right")
 	Gauge        = load("gauge")
 	Globe        = load("globe")
+	Sun          = load("sun")
+	Moon         = load("moon")
+	SunMoon      = load("sun-moon")
 )
 
 // symbolNames are the SF Symbols the Mac draws in place of each icon (see
@@ -74,6 +77,7 @@ var symbolNames = map[*ui.SVG]string{
 	Coffee: "cup.and.saucer.fill", Monitor: "display", Search: "magnifyingglass", Refresh: "arrow.clockwise",
 	Download: "arrow.down.circle", Folder: "folder", Close: "xmark", Swap: "arrow.left.arrow.right",
 	Gauge: "gauge.with.dots.needle.33percent", Globe: "globe",
+	Sun: "sun.max.fill", Moon: "moon.fill", SunMoon: "circle.lefthalf.filled",
 }
 
 // Symbol is the SF Symbol name for icon, "" when it has none.

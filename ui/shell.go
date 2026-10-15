@@ -78,7 +78,14 @@ const SidebarWidth = 200
 // Shell builds the window every page shares: a left sidebar (navigation with
 // live values and a host switcher) and the page's content on the right.
 func Shell(c *ui.Context, a *App, content func()) {
-	c.SetTheme(themeFor(c.Theme().Dark))
+	dark := c.Theme().Dark // the system's appearance: each frame starts from it
+	switch a.settings.Appearance {
+	case "light":
+		dark = false
+	case "dark":
+		dark = true
+	}
+	c.SetTheme(themeFor(dark))
 	t := c.Theme()
 	if id := a.nextHost; id != "" {
 		a.nextHost = ""
@@ -119,6 +126,7 @@ func Shell(c *ui.Context, a *App, content func()) {
 							}
 						})
 						ui.Segmented(c, &a.windowIdx, windowLabels...)
+						a.appearanceButton(c)
 						a.pauseButton(c)
 					})
 					a.noticeBanner(c)
@@ -488,6 +496,31 @@ func plural(n int, noun string) string {
 		return fmt.Sprintf("%d %ses", n, noun)
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// appearanceButton cycles the appearance: following the system, light,
+// dark, and back. Its icon says which is in force.
+func (a *App) appearanceButton(c *ui.Context) {
+	t := c.Theme()
+	icon, tip, next := icons.SunMoon, "Appearance: System", "light"
+	switch a.settings.Appearance {
+	case "light":
+		icon, tip, next = icons.Sun, "Appearance: Light", "dark"
+	case "dark":
+		icon, tip, next = icons.Moon, "Appearance: Dark", ""
+	}
+	b := ui.Row(c).Key("appearance").Size(28, 28).Radius(components.Grid).Center().Label(tip).Tooltip(tip)
+	if b.Hovered() {
+		b.Background(t.SurfaceHover)
+	}
+	if b.Clicked() {
+		s := a.settings
+		s.Appearance = next
+		a.changeSettings(s)
+	}
+	b.Children(func() {
+		components.Glyph(c, icon, 15, t.Text)
+	})
 }
 
 // pauseButton toggles holding updates back; it shows a play glyph and a
