@@ -202,9 +202,9 @@ func (p *Packages) Render(c *ui.Context, in PackagesInput) {
 			components.Banner(c, components.BannerWarning, "Could not list everything: "+p.err.Error())
 		}
 		_, wh := c.Size()
-		h := max(wh-260, 200) // the whole page, unless a task's log shares it
+		h := max(wh-165, 200) // the whole page, unless a task's log shares it
 		if started {
-			h = max(wh-520, 200)
+			h = max(wh-425, 200)
 		}
 		if p.loaded && len(rows) == 0 {
 			components.EmptyState(c, "Nothing installed")

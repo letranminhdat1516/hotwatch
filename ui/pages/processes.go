@@ -410,7 +410,7 @@ func (p *Processes) actionLine(c *ui.Context, in ProcessesInput) {
 func (p *Processes) content(c *ui.Context, in ProcessesInput) {
 	ps := in.View.Procs
 	_, wh := c.Size()
-	h := max(wh-300, 240)
+	h := max(wh-185, 240)
 	sel := -1 // index of the chosen process in ps
 	if p.hasSel {
 		if i, ok := p.cache.index[p.sel]; ok && i < len(ps) && p.visible(i) {

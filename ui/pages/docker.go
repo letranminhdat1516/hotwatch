@@ -187,7 +187,7 @@ func (d *Docker) Render(c *ui.Context, in DockerInput) {
 
 func (d *Docker) content(c *ui.Context, in DockerInput) {
 	_, wh := c.Size()
-	h := max(wh-300, 240)
+	h := max(wh-185, 240)
 	d.logs.mu.Lock()
 	open := d.logs.open
 	d.logs.mu.Unlock()

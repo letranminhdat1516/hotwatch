@@ -224,7 +224,7 @@ func (p *Apps) Render(c *ui.Context, in AppsInput) {
 			return
 		}
 		_, wh := c.Size()
-		h := max(wh-260, 240)
+		h := max(wh-165, 240)
 		sel, hasSel := p.selected()
 		if hasSel && in.Width > 700 {
 			ui.Row(c).Gap(2 * g()).AlignItems(ui.Stretch).Height(h).Children(func() {
