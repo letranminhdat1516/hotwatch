@@ -450,7 +450,7 @@ func TestLoadConfigFromDisk(t *testing.T) {
 	if !slices.Equal(app.columns["processes"], []string{"cpu"}) {
 		t.Fatalf("columns %v", app.columns)
 	}
-	if w.interval() != 2*time.Second {
+	if w.interval() != time.Second {
 		t.Fatalf("interval %v", w.interval())
 	}
 }
