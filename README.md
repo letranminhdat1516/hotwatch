@@ -42,12 +42,16 @@ its SHA-256; the app keeps the token in the macOS Keychain (service
 ## Run
 
 ```sh
-make run                                     # go run ./cmd/hotwatch
-# or a binary:
-CGO_ENABLED=0 go build -o dist/hotwatch-app ./cmd/hotwatch && ./dist/hotwatch-app
+make app                                     # dist/darwin-arm64/Hotwatch.app and Hotwatch 0.1.0 arm64.dmg
+open dist/darwin-arm64/Hotwatch.app
+make run                                     # quick, unsigned: go run ./cmd/hotwatch
 ```
 
-The first launch asks the Keychain for host tokens. Settings live in
+`make app` signs with the identity in `mygo.json` (an Apple Development
+certificate; change `macos.signingIdentity` to yours). A signed app keeps
+one identity across builds, so the Keychain asks for the host tokens once:
+answer "Always Allow". Unsigned `make run` builds are a new program to the
+Keychain each time and ask again. Settings live in
 `~/Library/Application Support/Hotwatch/config.json`; the refresh interval
 defaults to 1 s (Settings → Updates).
 
@@ -103,7 +107,7 @@ Suite: `go test -count=1 ./...` on the Mac → **33 ok, 4 without tests, exit 0*
 | R19 | Clean-room | whole repo | — | ✅ | `git ls-files \| grep -i pulse` → nothing; pages rebuilt from screenshots; icons are Lucide (ISC) or SF Symbols drawn by macOS at run time |
 | R20 | Settings: interval, language, columns, launch at login | `ui/pages/settings.go`, `store/`, `ui/i18n` | `TestSettingsPageChangesIntervalAndUnits`, `TestIntervalDefaults`, `TestEveryEnglishKeyHasVietnamese` | ⚠️ | interval, units and columns work; the Vietnamese catalogue is complete but pages are not switched to it; no launch at login |
 | R21 | Menu bar item | `ui/nook` (notch bar instead) | `TestNookFeedAndCommands` | ⚠️ | the notch bar and island show CPU and memory; there is no menu bar status item |
-| R22 | Build and ship: `.app`/`.dmg`, agent binaries, installer | `Makefile`, `deploy/` | — | ⚠️ | agent binaries built ✅; `make dmg` → "no Go files in /Users/cicca/src/hotwatch" (no `mygo.json` yet) ❌ |
+| R22 | Build and ship: `.app`/`.dmg`, agent binaries, installer | `Makefile`, `mygo.json`, `resources/icon.png`, `deploy/` | — | ✅ | `make app` → Hotwatch.app 15.0 MB and Hotwatch 0.1.0 arm64.dmg 4.8 MB; `codesign --verify --deep --strict` OK, Identifier dev.hotwatch.app; agent binaries for amd64 and arm64 built on agent-box |
 | R23 | Navigation across the top | `ui/shell.go` | `TestShell*` (9) | ⚠️ | replaced at the owner's request by a Pulse-style left sidebar |
 | R24 | Host panel on the right | `ui/shell.go` host switcher | `TestHostSwitch*` (4) | ⚠️ | replaced with R23: hosts are a switcher at the foot of the sidebar |
 | R25 | First data < 1 s; page or host switch < 100 ms | `cmd/hotwatch/wire.go` | `TestTimings` | ✅ | app log: `ui.first_data ms=390`; 11 `ui.switch` entries, the slowest 11 ms |
@@ -112,8 +116,8 @@ Suite: `go test -count=1 ./...` on the Mac → **33 ok, 4 without tests, exit 0*
 
 - **Agent CPU on the VPS is 4 %** of one core against a 1 % target. Profile the
   agent's sampler on the 4-core VPS and cut its per-poll work.
-- **`.app`/`.dmg` (R22):** add `mygo.json` and point `make dmg` at
-  `./cmd/hotwatch`. No signing identity is set.
+- **Distribution:** the app is signed with an Apple Development certificate,
+  which runs on this Mac; other Macs need a Developer ID and notarisation.
 - **Vietnamese (R20):** the catalogue is complete but pages still print
   English strings directly. Launch at login is missing.
 - **Menu bar item (R21)** is not built; the notch bar covers part of it.

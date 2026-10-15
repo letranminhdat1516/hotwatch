@@ -1,0 +1,13 @@
+{
+  "name": "Hotwatch",
+  "identifier": "dev.hotwatch.app",
+  "version": "0.1.0",
+  "copyright": "© 2026 Lê Trần Minh Đạt",
+  "icon": "resources/icon.png",
+  "main": "./cmd/hotwatch",
+  "out": "dist",
+  "macos": {
+    "minimumSystemVersion": "14.0",
+    "signingIdentity": "Apple Development: datltmse@gmail.com (VM5LVXHN5A)"
+  }
+}
