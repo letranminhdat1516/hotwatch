@@ -24,6 +24,7 @@ type Deps struct {
 	Hostname  func() (string, error)
 	Arch      string
 	Kernel    func() (string, error)
+	Machine   func() model.Machine // nil: nothing for the About page
 	// StartTime returns the start time of one process, in the same form the
 	// collector reports it; it must return ErrNoProcess when pid is not running.
 	StartTime func(ctx context.Context, pid int32) (time.Time, error)
@@ -75,6 +76,9 @@ func (l *Local) Info(ctx context.Context) (model.HostInfo, error) {
 	}
 	if l.d.Kernel != nil {
 		info.Kernel, _ = l.d.Kernel()
+	}
+	if l.d.Machine != nil {
+		info.Machine = l.d.Machine()
 	}
 	gpus, _ := l.gpus(ctx)
 	bat, _ := l.battery(ctx)

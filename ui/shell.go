@@ -47,6 +47,7 @@ var groups = []group{
 		{Key: "docker", Title: "Docker", icon: icons.Docker, needs: func(c model.Caps) bool { return c.Docker }},
 		{Key: "apps", Title: "Apps", icon: icons.Apps, needs: func(c model.Caps) bool { return c.Apps }},
 		{Key: "packages", Title: "Packages", icon: icons.Packages, needs: func(c model.Caps) bool { return c.Packages }},
+		{Key: "about", Title: "About This Mac", icon: icons.Info, needs: func(c model.Caps) bool { return c.Apps }},
 		{Key: "settings", Title: "Settings", icon: icons.Settings},
 	}},
 }
@@ -446,6 +447,8 @@ func pageSubtitle(page string, v hub.HostView) string {
 		}
 	case "energy":
 		return "Battery and power"
+	case "about":
+		return v.Info.Machine.Model
 	case "docker":
 		if n := len(v.Ctrs); n > 0 {
 			return plural(n, "container")

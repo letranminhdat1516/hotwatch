@@ -42,4 +42,6 @@ var (
 	Play         = load("play")
 	Battery      = load("battery")
 	Thermometer  = load("thermometer")
+	Info         = load("info")
+	Laptop       = load("laptop")
 )

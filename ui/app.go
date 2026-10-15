@@ -271,6 +271,8 @@ func (a *App) View(c *ui.Context) {
 				Width: a.split - 6*components.Grid, Actions: a.acts})
 		case "docker":
 			a.docker.Render(c, pages.DockerInput{HostID: a.selected, View: v, Gen: a.gen, Now: a.now(), Actions: a.acts})
+		case "about":
+			pages.About(c, v, a.now())
 		case "settings":
 			pages.Settings(c, &a.settingsUI, a.settings, a.changeSettings)
 		default:

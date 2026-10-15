@@ -125,7 +125,7 @@ func main() {
 		{ID: "vps", Name: "VPS (dat)", Kind: "agent", Group: "g-public"},
 	}
 	views := map[string]hub.HostView{
-		"local":     mkView("darwin", model.Caps{GPU: true, Battery: true, Processes: true}, macSnap()),
+		"local":     mkView("darwin", model.Caps{GPU: true, Battery: true, Processes: true, Apps: true, Packages: true}, macSnap()),
 		"agent-box": mkView("linux", model.Caps{GPU: true, Docker: true, Processes: true}, boxSnap()),
 		"vps":       mkView("linux", model.Caps{Docker: true, Processes: true}, vpsSnap()),
 	}
@@ -136,6 +136,9 @@ func main() {
 		}
 	}
 	lv := views["local"]
+	lv.Info.Hostname, lv.Info.Arch, lv.Info.Kernel, lv.Info.CPUCount = "cicca-mbp", "arm64", "Darwin 25.3.0", 10
+	lv.Info.Machine = model.Machine{Model: "MacBook Pro (14-inch, 2025)", ModelID: "Mac17,1", Chip: "Apple M5",
+		PerfCores: 4, EffCores: 6, GPUCores: 10, OSVersion: "26.1", Build: "25B78", Serial: "C02XXXXXXX7K", DisplayW: 3024, DisplayH: 1964, DisplayScale: 2}
 	lv.Procs = []model.Process{
 		{PID: 1, Name: "Google Chrome", RSS: 8<<30 + 70<<20, AppBundle: "/Applications/Google Chrome.app", User: "cicca", CPUPct: 5.1, Threads: 1055},
 		{PID: 2, Name: "node", RSS: 3<<30 + 450<<20, User: "cicca", CPUPct: 66.3, Threads: 40},

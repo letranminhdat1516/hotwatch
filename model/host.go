@@ -25,6 +25,26 @@ type HostInfo struct {
 	Kernel          string `json:"kernel"`
 	CPUCount        int    `json:"cpuCount"`
 	Caps            Caps   `json:"caps"`
+	// Machine describes the hardware and OS build for the About page; a
+	// host that cannot read a fact leaves it zero and the page omits it.
+	Machine Machine `json:"machine,omitzero"`
+}
+
+// Machine is what "About This Mac" shows: the model, chip, core split, OS
+// build, serial and main display. Every field is optional.
+type Machine struct {
+	Model        string `json:"model,omitempty"`     // "MacBook Pro (14-inch, 2025)"
+	ModelID      string `json:"modelId,omitempty"`   // "Mac17,1"
+	Chip         string `json:"chip,omitempty"`      // "Apple M5"
+	PerfCores    int    `json:"perfCores,omitempty"` // performance cores
+	EffCores     int    `json:"effCores,omitempty"`  // efficiency cores
+	GPUCores     int    `json:"gpuCores,omitempty"`
+	OSVersion    string `json:"osVersion,omitempty"` // "26.1"
+	Build        string `json:"build,omitempty"`     // "25B78"
+	Serial       string `json:"serial,omitempty"`
+	DisplayW     int    `json:"displayW,omitempty"` // main display, pixels
+	DisplayH     int    `json:"displayH,omitempty"`
+	DisplayScale int    `json:"displayScale,omitempty"` // 2 on a Retina display
 }
 
 type Caps struct {
