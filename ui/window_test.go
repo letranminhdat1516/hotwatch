@@ -43,13 +43,13 @@ func TestPauseHoldsUpdatesUntilResumed(t *testing.T) {
 	}
 	app.Apply("h1", hub.HostView{Snap: &model.Snapshot{CPU: model.CPU{Total: 90}}})
 	tt.Frame()
-	if !slices.Contains(tt.Texts(), "10.0 %") || slices.Contains(tt.Texts(), "90.0 %") {
+	if !slices.Contains(tt.Texts(), "10 %") || slices.Contains(tt.Texts(), "90 %") {
 		t.Fatalf("paused view changed: %q", tt.Texts())
 	}
 	if err := tt.Click("Resume updates"); err != nil {
 		t.Fatal(err)
 	}
-	if app.Paused() || !slices.Contains(tt.Texts(), "90.0 %") {
+	if app.Paused() || !slices.Contains(tt.Texts(), "90 %") {
 		t.Fatalf("resume did not show the held view: paused=%v %q", app.Paused(), tt.Texts())
 	}
 }

@@ -34,6 +34,17 @@ func MiniDots(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float6
 	return dotMatrix(c, [][]hub.Point{pts}, from, to, ceiling, tint, height)
 }
 
+// StackedSparkline is Sparkline with layers (see StackedDotChart): the
+// card-sized matrix, no axis.
+func StackedSparkline(c *ui.Context, layers []DotLayer, from, to time.Time, ceiling float64, tint ui.Color) ui.Element {
+	pts := make([][]hub.Point, len(layers))
+	colors := make([]ui.Color, len(layers))
+	for i, l := range layers {
+		pts[i], colors[i] = l.Pts, l.Color
+	}
+	return dotMatrixColored(c, pts, colors, from, to, ceiling, tint, chartH)
+}
+
 // DotChart is a taller dot matrix with a time axis under it, for a page's
 // main chart.
 func DotChart(c *ui.Context, pts []hub.Point, from, to time.Time, ceiling float64, tint ui.Color, height float32) ui.Element {

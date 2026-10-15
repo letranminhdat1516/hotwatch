@@ -152,3 +152,18 @@ func TestHistoryKeepsUserAndSystemCPU(t *testing.T) {
 		t.Fatalf("cpu.system %+v", got)
 	}
 }
+
+func TestHistoryKeepsStackSeries(t *testing.T) {
+	h := NewHistory()
+	rx, tx, rd, wr := 300.0, 100.0, 20.0, 5.0
+	h.Push(time.Unix(1000, 0), model.Snapshot{
+		Memory: model.Memory{Total: 100, Used: 80, App: 40, Wired: 10, Compressed: 30},
+		Net:    []model.Interface{{Name: "en0", Up: true, RxBps: &rx, TxBps: &tx}},
+		Disks:  []model.Volume{{Mount: "/", Device: "d", ReadBps: &rd, WriteBps: &wr}},
+	})
+	for name, want := range map[string]float64{"mem.wired": 10, "mem.wiredcomp": 40, "mem": 80, "net.rxtx": 400, "disk.rw": 25} {
+		if got := h.Series(name); len(got) != 1 || got[0].V != want {
+			t.Errorf("%s = %+v, want %v", name, got, want)
+		}
+	}
+}

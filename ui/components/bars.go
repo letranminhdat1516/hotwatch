@@ -44,7 +44,8 @@ func BarRow(c *ui.Context, label string, pct *float64, value string, tint ui.Col
 type Segment struct {
 	Label string
 	Value uint64
-	Muted bool
+	Muted bool // free space: the neutral track colour
+	Shade bool // a secondary part (cached files): grey
 }
 
 // StackedBar draws segments side by side, sized by their values, with a
@@ -57,8 +58,12 @@ func StackedBar(c *ui.Context, segs []Segment) ui.Element {
 	n := 0
 	for i, s := range segs {
 		total += s.Value
-		if s.Muted {
+		switch {
+		case s.Muted:
 			colors[i] = t.Border
+			continue
+		case s.Shade:
+			colors[i] = ShadeColor(t)
 			continue
 		}
 		colors[i] = palette[n%len(palette)]

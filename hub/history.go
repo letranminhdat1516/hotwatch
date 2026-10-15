@@ -97,8 +97,13 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 		h.add("cpu.user", t, *s.CPU.User)
 		h.add("cpu.system", t, *s.CPU.System)
 	}
-	if s.Memory.Total > 0 {
-		h.add("mem", t, float64(s.Memory.Used)/float64(s.Memory.Total)*100)
+	if m := s.Memory; m.Total > 0 {
+		pct := func(v uint64) float64 { return float64(v) / float64(m.Total) * 100 }
+		h.add("mem", t, pct(m.Used))
+		if m.App+m.Wired+m.Compressed > 0 { // the parts, stacked: Wired, + Compressed (App tops them up to "mem")
+			h.add("mem.wired", t, pct(m.Wired))
+			h.add("mem.wiredcomp", t, pct(m.Wired+m.Compressed))
+		}
 	}
 	ifs := make([]model.Interface, 0, len(s.Net))
 	for _, i := range s.Net {
@@ -114,6 +119,11 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 		h.add("net.tx", t, v)
 		h.integrate("net.tx", t, v)
 	}
+	if rx, ok1 := sum(ifs, func(i model.Interface) *float64 { return i.RxBps }); ok1 {
+		if tx, ok2 := sum(ifs, func(i model.Interface) *float64 { return i.TxBps }); ok2 {
+			h.add("net.rxtx", t, rx+tx) // the stack's top: upload under download
+		}
+	}
 	// Volumes of one device report the same store's rate: count it once.
 	disks := model.DistinctVolumes(s.Disks)
 	if v, ok := sum(disks, func(d model.Volume) *float64 { return d.ReadBps }); ok {
@@ -123,6 +133,9 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 	if v, ok := sum(disks, func(d model.Volume) *float64 { return d.WriteBps }); ok {
 		h.add("disk.write", t, v)
 		h.integrate("disk.write", t, v)
+		if r, ok := sum(disks, func(d model.Volume) *float64 { return d.ReadBps }); ok {
+			h.add("disk.rw", t, r+v) // the stack's top: writes under reads
+		}
 	}
 	if len(s.GPUs) > 0 && s.GPUs[0].UtilPct != nil {
 		h.add("gpu", t, *s.GPUs[0].UtilPct)

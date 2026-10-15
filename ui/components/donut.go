@@ -15,8 +15,12 @@ func SegColors(t *ui.Theme, segs []Segment) []ui.Color {
 	colors := make([]ui.Color, len(segs))
 	n := 0
 	for i, s := range segs {
-		if s.Muted {
+		switch {
+		case s.Muted:
 			colors[i] = t.Border
+			continue
+		case s.Shade:
+			colors[i] = ShadeColor(t)
 			continue
 		}
 		colors[i] = palette[n%len(palette)]

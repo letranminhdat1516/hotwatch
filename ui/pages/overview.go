@@ -3,7 +3,9 @@
 package pages
 
 import (
+	"cmp"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -31,8 +33,15 @@ type card struct {
 	badge    string // badge beside the headline (memory pressure); "" for none
 	tone     string // badge tone: "ok", "warn" or "bad"
 	stats    [3]stat
-	series   string // hub.History series for the chart; "" for none
-	pctScale bool   // the chart's ceiling is 100
+	series   string  // hub.History series for the chart; "" for none
+	pctScale bool    // the chart's ceiling is 100
+	layers   []layer // a stacked chart instead of series: front (bottom) first
+}
+
+// layer is one series of a card's stacked chart and its colour.
+type layer struct {
+	series string
+	hex    string
 }
 
 // Overview builds the Overview page's content for one host: the metric
@@ -52,7 +61,7 @@ func Overview(c *ui.Context, v hub.HostView, now time.Time) {
 				if cd.series != "" && v.Hist != nil {
 					pts = v.Hist.Series(cd.series)
 				}
-				overviewCard(c, cd, pts, now)
+				overviewCard(c, cd, pts, v.Hist, now)
 			}
 			overviewExtras(c, v)
 		})
@@ -63,7 +72,7 @@ func Overview(c *ui.Context, v hub.HostView, now time.Time) {
 // overviewCard draws one metric card: the tinted icon and title with a
 // chevron, the sub-label, the headline with its unit (and badge), the three
 // stats, then the dot-matrix chart of pts over the window ending at now.
-func overviewCard(c *ui.Context, cd card, pts []hub.Point, now time.Time) {
+func overviewCard(c *ui.Context, cd card, pts []hub.Point, hist *hub.History, now time.Time) {
 	t := c.Theme()
 	tint := t.TextMuted
 	if col, ok := components.MetricColor(cd.key); ok {
@@ -103,15 +112,37 @@ func overviewCard(c *ui.Context, cd card, pts []hub.Point, now time.Time) {
 				})
 			}
 		})
-		if cd.series != "" {
+		if cd.series != "" || len(cd.layers) > 0 {
 			ui.Spacer(c) // charts line up along the bottom of a row
 			ceiling := 0.0
 			if cd.pctScale {
 				ceiling = 100
 			}
-			components.Sparkline(c, pts, now.Add(-components.ChartWindow()), now, ceiling, tint).Margin(g, 0, 0, 0)
+			from := now.Add(-components.ChartWindow())
+			if ls := stackLayers(hist, cd.layers); len(ls) > 0 {
+				components.StackedSparkline(c, ls, from, now, ceiling, tint).Margin(g, 0, 0, 0)
+			} else {
+				components.Sparkline(c, pts, from, now, ceiling, tint).Margin(g, 0, 0, 0)
+			}
 		}
 	})
+}
+
+// stackLayers resolves a card's layers from the history; nil when any
+// layer has no points yet (the plain sparkline stands in).
+func stackLayers(h *hub.History, ls []layer) []components.DotLayer {
+	if h == nil || len(ls) == 0 {
+		return nil
+	}
+	out := make([]components.DotLayer, 0, len(ls))
+	for _, l := range ls {
+		pts := h.Series(l.series)
+		if len(pts) == 0 {
+			return nil
+		}
+		out = append(out, components.DotLayer{Pts: pts, Color: ui.Hex(l.hex)})
+	}
+	return out
 }
 
 // pill is a small tinted status badge.
@@ -130,57 +161,175 @@ func pill(c *ui.Context, text, tone string) {
 }
 
 // overviewExtras adds the analytics cards after the metric cards, in the
-// same grid: Memory by Type (donut) and Memory by App, each only when its
-// data is available for this host. Energy by App needs per-process power
-// from the collector and is omitted until it reports it.
+// same grid: Memory by Type, Memory by App and Energy by App, each only
+// when its data is available for this host.
 func overviewExtras(c *ui.Context, v hub.HostView) {
 	s := v.Snap
-	t := c.Theme()
-	g := float32(components.Grid)
 	if !partial(s, "memory") && s.Memory.Total > 0 {
-		segs := segments(s.Memory, v.Info.OS)
-		components.Surface(c, ui.Column(c).Gap(g)).Children(func() {
-			overviewSectionHeader(c, icons.Memory, "Memory by Type", "memory")
-			ui.Row(c).Gap(2 * g).AlignItems(ui.Center).Children(func() {
-				components.Donut(c, segs, 14*g)
-				components.SegLegend(c, segs)
-			})
-		})
+		memoryByType(c, s.Memory, v.Info.OS)
 	}
 	if apps := byApp(v.Procs); len(apps) > 0 {
-		barTint := metricTint(c, "memory")
-		var maxRSS, sum uint64
-		for _, a := range apps {
-			maxRSS = max(maxRSS, a.rss)
-			sum += a.rss
-		}
-		components.Surface(c, ui.Column(c).Gap(g)).Children(func() {
-			ui.Row(c).AlignItems(ui.Center).Children(func() {
-				overviewSectionHeader(c, icons.Apps, "Memory by App", "")
-				ui.Spacer(c)
-				ui.Text(c, format.Bytes(sum)+" in all").FontSize(12).TextColor(t.TextMuted).SingleLine()
+		memoryByApp(c, apps)
+	}
+	if apps := energyByApp(v.Procs); len(apps) > 0 {
+		energyCard(c, apps)
+	}
+}
+
+// memoryByType is the donut of the memory parts with "83% in use" in its
+// middle; on a Mac, cached files are drawn in grey within what is free, and
+// Free is everything not in use, as Activity Monitor counts it.
+func memoryByType(c *ui.Context, m model.Memory, os string) {
+	t := c.Theme()
+	g := float32(components.Grid)
+	segs := segments(m, os)
+	free := uint64(0)
+	if m.Total > m.Used {
+		free = m.Total - m.Used
+	}
+	ring, legend := segs, segs
+	if os == "darwin" && m.Cached > 0 && len(segs) > 0 {
+		cached := min(m.Cached, free)
+		parts := segs[:len(segs)-1] // App, Wired, Compressed
+		ring = append(append([]components.Segment{}, parts...),
+			components.Segment{Label: "Cached", Value: cached, Shade: true},
+			components.Segment{Label: "Free", Value: free - cached, Muted: true})
+		legend = append(append([]components.Segment{}, parts...),
+			components.Segment{Label: "Cached", Value: m.Cached, Shade: true},
+			components.Segment{Label: "Free", Value: free, Muted: true})
+	}
+	colors := components.SegColors(t, legend)
+	components.Surface(c, ui.Column(c).Gap(g)).Children(func() {
+		overviewSectionHeader(c, icons.Memory, "Memory by Type", "memory")
+		ui.Row(c).Gap(3*g).AlignItems(ui.Center).Margin(g, 0, 0, 0).Children(func() {
+			components.Donut(c, ring, 16*g).Center().Children(func() {
+				ui.Text(c, fmt.Sprintf("%.0f%%", float64(m.Used)/float64(m.Total)*100)).FontSize(26).FontWeight(700).SingleLine()
+				ui.Text(c, "in use").FontSize(12).TextColor(t.TextMuted).SingleLine()
 			})
-			ui.Column(c).Gap(g - 2).Children(func() {
-				for i, a := range apps {
-					fill := float32(0)
-					if maxRSS > 0 {
-						fill = float32(a.rss) / float32(maxRSS)
-					}
-					// Keyed by rank, not name: two bundles can share a display name.
-					ui.Row(c).Key(fmt.Sprintf("app-%d", i)).Gap(g).AlignItems(ui.Center).Children(func() {
-						appIcon(c, a.name, a.bundle)
-						ui.Text(c, a.name).FontSize(12).TextColor(t.Text).Width(13 * g).SingleLine()
-						ui.Box(c).Grow(1).Height(8).Radius(4).Background(t.Border).Draw(func(p *ui.Painter, r ui.Rect) {
-							if fill > 0 {
-								p.Fill(ui.Rect{X: r.X, Y: r.Y, W: max(r.W*fill, 8), H: r.H}, barTint, 4)
-							}
-						})
-						ui.Text(c, format.Bytes(a.rss)).FontSize(12).FontWeight(600).Width(10 * g).TextAlign(ui.End).SingleLine()
+			ui.Column(c).Gap(g - 2).Grow(1).Children(func() {
+				for i, sg := range legend {
+					ui.Row(c).Gap(g).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Size(10, 10).Radius(5).Background(colors[i])
+						ui.Text(c, sg.Label).FontSize(14).Grow(1).NoWrap()
+						ui.Text(c, format.Bytes(sg.Value)).FontSize(14).TextColor(t.TextMuted).NoWrap()
 					})
 				}
 			})
 		})
+	})
+}
+
+// memoryByApp is a mosaic of the largest apps: the first two as tall
+// tiles, the next one wide, then small tiles with only their icon.
+func memoryByApp(c *ui.Context, apps []app) {
+	t := c.Theme()
+	g := float32(components.Grid)
+	var sum uint64
+	for _, a := range apps {
+		sum += a.rss
 	}
+	components.Surface(c, ui.Column(c).Gap(g)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			overviewSectionHeader(c, icons.Apps, "Memory by App", "memory")
+			ui.Spacer(c)
+			ui.Text(c, format.Bytes(sum)+" in all").FontSize(12).TextColor(t.TextMuted).SingleLine()
+		})
+		ui.Grid(c).Columns(4).RowTracks(ui.Fixed(84), ui.Fixed(84)).Gap(g).Margin(g/2, 0, 0, 0).Children(func() {
+			for i, a := range apps[:min(len(apps), 7)] {
+				tile := ui.Column(c).Key(fmt.Sprintf("tile-%d", i)).Padding(10).Radius(12).Gap(2).
+					Background(t.SurfaceHover).Label(a.name)
+				big := i < 3
+				switch i {
+				case 0, 1:
+					tile.RowSpan(2)
+				case 2:
+					tile.ColumnSpan(2)
+				}
+				tile.Children(func() {
+					appIcon(c, a.name, a.bundle)
+					if big {
+						ui.Spacer(c)
+						ui.Text(c, a.name).FontSize(13).FontWeight(600).SingleLine()
+						ui.Text(c, format.Bytes(a.rss)).FontSize(12).TextColor(t.TextMuted).SingleLine()
+					}
+				})
+			}
+		})
+	})
+}
+
+// powerApp is one app's share of the power the processes draw.
+type powerApp struct {
+	name, bundle string
+	mw           float64
+}
+
+// energyByApp groups the processes' power by app (helpers under their
+// app) and returns the five largest; nil when no process reports power.
+func energyByApp(ps []model.Process) []powerApp {
+	idx := map[string]int{}
+	var out []powerApp
+	for _, p := range ps {
+		if p.PowerMW == nil || *p.PowerMW <= 0 {
+			continue
+		}
+		key, name, bundle := p.Name, p.Name, ""
+		if p.AppBundle != "" {
+			bundle = outerBundle(p.AppBundle)
+			key, name = bundle, strings.TrimSuffix(path.Base(bundle), ".app")
+		}
+		i, ok := idx[key]
+		if !ok {
+			i = len(out)
+			idx[key] = i
+			out = append(out, powerApp{name: name, bundle: bundle})
+		}
+		out[i].mw += *p.PowerMW
+	}
+	slices.SortStableFunc(out, func(a, b powerApp) int { return cmp.Compare(b.mw, a.mw) })
+	return out
+}
+
+// watts is "437 mW" under a watt, "1.26 W" from one.
+func watts(mw float64) string {
+	if mw < 1000 {
+		return fmt.Sprintf("%.0f mW", mw)
+	}
+	return fmt.Sprintf("%.2f W", mw/1000)
+}
+
+// energyCard lists the five apps drawing the most power with a bar each.
+func energyCard(c *ui.Context, apps []powerApp) {
+	t := c.Theme()
+	g := float32(components.Grid)
+	tint := metricTint(c, "energy")
+	var sum float64
+	for _, a := range apps {
+		sum += a.mw
+	}
+	top := apps[:min(len(apps), 5)]
+	components.Surface(c, ui.Column(c).Gap(g)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			overviewSectionHeader(c, icons.Energy, "Energy by App", "energy")
+			ui.Spacer(c)
+			ui.Text(c, watts(sum)+" in all").FontSize(12).TextColor(t.TextMuted).SingleLine()
+		})
+		for i, a := range top {
+			fill := float32(a.mw / top[0].mw)
+			ui.Row(c).Key(fmt.Sprintf("energy-%d", i)).Gap(g).AlignItems(ui.Center).Children(func() {
+				appIcon(c, a.name, a.bundle)
+				ui.Column(c).Grow(1).Gap(4).Children(func() {
+					ui.Row(c).Children(func() {
+						ui.Text(c, a.name).FontSize(13).SingleLine().Grow(1)
+						ui.Text(c, watts(a.mw)).FontSize(13).TextColor(t.TextMuted).SingleLine()
+					})
+					ui.Box(c).Height(5).Radius(2.5).Background(tint.Alpha(0.18)).Draw(func(p *ui.Painter, r ui.Rect) {
+						p.Fill(ui.Rect{X: r.X, Y: r.Y, W: max(r.W*fill, 5), H: r.H}, tint, 2.5)
+					})
+				})
+			})
+		}
+	})
 }
 
 // overviewSectionHeader is the title row of an analytics card: a tinted
@@ -241,7 +390,7 @@ func pressureBadge(level string) (text, tone string) {
 	case "normal":
 		return "Normal", "ok"
 	case "warn":
-		return "Warning", "warn"
+		return "Elevated", "warn"
 	case "critical":
 		return "Critical", "bad"
 	}
@@ -260,21 +409,30 @@ func cards(v hub.HostView, now time.Time) []card {
 	var out []card
 
 	cpu := card{key: "cpu", icon: icons.CPU, title: "CPU", sub: "Now", value: format.Unknown, unit: "%",
-		stats: unknown3("User", "System", "Load 1m"), series: "cpu", pctScale: true}
+		stats: unknown3("User", "System", "Load 1m"), series: "cpu", pctScale: true,
+		layers: []layer{{"cpu.system", cpuSystemHex}, {"cpu", metricHex("cpu")}}}
+	if s.CPU.TempC != nil {
+		cpu.stats[2].label = "Temperature"
+	}
 	if !partial(s, "cpu") {
-		cpu.value = format.Number(ptr(s.CPU.Total))
-		if n := format.Number(s.CPU.User); n != format.Unknown {
-			cpu.stats[0].value = n + "%"
+		cpu.value = whole(s.CPU.Total)
+		if s.CPU.User != nil {
+			cpu.stats[0].value = pctShort(*s.CPU.User)
 		}
-		if n := format.Number(s.CPU.System); n != format.Unknown {
-			cpu.stats[1].value = n + "%"
+		if s.CPU.System != nil {
+			cpu.stats[1].value = pctShort(*s.CPU.System)
 		}
-		cpu.stats[2].value = fmt.Sprintf("%.2f", s.CPU.Load[0])
+		if s.CPU.TempC != nil {
+			cpu.stats[2].value = degrees(*s.CPU.TempC)
+		} else {
+			cpu.stats[2].value = fmt.Sprintf("%.2f", s.CPU.Load[0])
+		}
 	}
 	out = append(out, cpu)
 
 	mem := card{key: "memory", icon: icons.Memory, title: "Memory", value: format.Unknown,
-		stats: unknown3("App", "Wired", "Compressed"), series: "mem", pctScale: true}
+		stats: unknown3("App", "Wired", "Compressed"), series: "mem", pctScale: true,
+		layers: []layer{{"mem.wired", "#ff9f0a"}, {"mem.wiredcomp", "#64d2ff"}, {"mem", metricHex("memory")}}}
 	if !partial(s, "memory") && s.Memory.Total > 0 {
 		mem.sub = "In use of " + format.Bytes(s.Memory.Total)
 		mem.value, mem.unit = splitUnit(format.Bytes(s.Memory.Used))
@@ -301,7 +459,9 @@ func cards(v hub.HostView, now time.Time) []card {
 		cd := card{key: "gpu", icon: icons.GPU, title: "GPU", sub: name, value: format.Unknown, unit: "%",
 			stats: unknown3("Memory", "Average", "Peak"), series: gpuSeries(i), pctScale: true}
 		if !partial(s, "gpu") {
-			cd.value = format.Number(gp.UtilPct)
+			if gp.UtilPct != nil {
+				cd.value = whole(*gp.UtilPct)
+			}
 			if gp.MemUsed != nil {
 				cd.stats[0].value = format.Bytes(*gp.MemUsed)
 			}
@@ -316,7 +476,8 @@ func cards(v hub.HostView, now time.Time) []card {
 	}
 
 	disk := card{key: "disk", icon: icons.Disk, title: "Disk", value: format.Unknown,
-		stats: unknown3("Reading", "Writing", "Written"), series: "disk.write"}
+		stats: unknown3("Reading", "Writing", "Written"), series: "disk.write",
+		layers: []layer{{"disk.write", "#64d2ff"}, {"disk.rw", metricHex("disk")}}}
 	if !partial(s, "disks") && len(s.Disks) > 0 {
 		var used, total uint64
 		var reads, writes []*float64
@@ -340,7 +501,8 @@ func cards(v hub.HostView, now time.Time) []card {
 	out = append(out, disk)
 
 	net := card{key: "network", icon: icons.Network, title: "Network", sub: "Downloading", value: format.Unknown,
-		stats: unknown3("Uploading", "Received", "Sent"), series: "net.rx"}
+		stats: unknown3("Uploading", "Received", "Sent"), series: "net.rx",
+		layers: []layer{{"net.tx", "#0a84ff"}, {"net.rxtx", metricHex("network")}}}
 	if !partial(s, "net") {
 		var rxs, txs []*float64
 		for _, i := range s.Net {
@@ -363,10 +525,16 @@ func cards(v hub.HostView, now time.Time) []card {
 	out = append(out, net)
 
 	if b := s.Battery; b != nil {
-		bat := card{key: "battery", icon: icons.Energy, title: "Battery", value: format.Unknown, unit: "%",
-			stats: unknown3("Remaining", "Power draw", "Temperature"), series: "battery", pctScale: true}
+		bat := card{key: "battery", icon: icons.Battery, title: "Battery", value: format.Unknown, unit: "%",
+			stats: unknown3("Remaining", "Power Draw", "Temperature"), series: "battery", pctScale: true}
+		if b.Charging {
+			bat.stats[0].label = "Until Full"
+		}
+		if b.HealthPct != nil {
+			bat.stats[2].label = "Health"
+		}
 		if !partial(s, "battery") {
-			bat.value = format.Number(ptr(b.ChargePct))
+			bat.value = whole(b.ChargePct)
 			bat.sub = "On battery"
 			switch {
 			case b.Charging:
@@ -380,13 +548,25 @@ func cards(v hub.HostView, now time.Time) []card {
 			if n := format.Number(b.PowerW); n != format.Unknown {
 				bat.stats[1].value = n + " W"
 			}
-			if n := format.Number(b.TempC); n != format.Unknown {
-				bat.stats[2].value = n + " °C"
+			switch {
+			case b.HealthPct != nil:
+				bat.stats[2].value = fmt.Sprintf("%.0f%%", *b.HealthPct)
+			case b.TempC != nil:
+				bat.stats[2].value = degrees(*b.TempC)
 			}
 		}
 		out = append(out, bat)
 	}
 	return out
+}
+
+// whole is a percentage headline without decimals: "34".
+func whole(v float64) string { return fmt.Sprintf("%.0f", v) }
+
+// metricHex is the hex of a metric colour, for chart layers.
+func metricHex(key string) string {
+	col, _ := components.MetricColor(key)
+	return fmt.Sprintf("#%02x%02x%02x", col.R, col.G, col.B)
 }
 
 // ratio is used/total in percent; nil when total is 0.

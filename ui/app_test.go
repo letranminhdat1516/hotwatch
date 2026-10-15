@@ -23,7 +23,7 @@ func testApp(v hub.HostView) *hwui.App {
 func TestOverviewShowsCardsAndHidesAbsentHardware(t *testing.T) {
 	app := testApp(hub.HostView{Snap: &model.Snapshot{CPU: model.CPU{Total: 37.5}, Battery: nil}})
 	tt := ui.NewTester(app.View, 1200, 800)
-	if !slices.Contains(tt.Texts(), "37.5 %") {
+	if !slices.Contains(tt.Texts(), "38 %") {
 		t.Fatalf("missing CPU value in %q", tt.Texts())
 	}
 	for _, want := range []string{"CPU", "Memory", "Disk", "Network"} {
@@ -71,11 +71,11 @@ func TestOverviewPartialSectionIsUnknown(t *testing.T) {
 		unknown []string
 	}{
 		// Headlines: memory "4.00 GB" in use, disk "75.0 GB" free, network
-		// "2.00 KB/s" down, battery "80.0 %"; the partial section's figures
+		// "2.00 KB/s" down, battery "80 %"; the partial section's figures
 		// are dashes, never zeros.
-		{"cpu", []string{"4.00 GB", "75.0 GB", "2.00 KB/s", "80.0 %", "Load 1m"}, []string{"37.5 %", "1.00", "2.00"}, []string{"—"}},
-		{"net", []string{"37.5 %", "4.00 GB", "80.0 %", "Downloading", "Uploading"}, []string{"2.00 KB/s", "1.00 KB/s"}, []string{"—"}},
-		{"battery", []string{"37.5 %", "4.00 GB", "2.00 KB/s"}, []string{"80.0 %"}, []string{"—"}},
+		{"cpu", []string{"4.00 GB", "75.0 GB", "2.00 KB/s", "80 %", "Load 1m"}, []string{"38 %", "1.00", "2.00"}, []string{"—"}},
+		{"net", []string{"38 %", "4.00 GB", "80 %", "Downloading", "Uploading"}, []string{"2.00 KB/s", "1.00 KB/s"}, []string{"—"}},
+		{"battery", []string{"38 %", "4.00 GB", "2.00 KB/s"}, []string{"80 %"}, []string{"—"}},
 	}
 	for _, tc := range cases {
 		snap := fullSnap()
@@ -117,7 +117,7 @@ func TestOverviewNetworkSkipsLoopbackAndDownInterfaces(t *testing.T) {
 func TestOverviewOneCardPerGPU(t *testing.T) {
 	snap := &model.Snapshot{GPUs: []model.GPU{{Name: "GPU A", UtilPct: f64(10)}, {Name: "GPU B", UtilPct: f64(20)}, {UtilPct: f64(30)}}}
 	tt := ui.NewTester(testApp(hub.HostView{Snap: snap}).View, 1200, 800)
-	for _, w := range []string{"GPU A", "10.0 %", "GPU B", "20.0 %", "GPU 3", "30.0 %"} {
+	for _, w := range []string{"GPU A", "10 %", "GPU B", "20 %", "GPU 3", "30 %"} {
 		if !slices.Contains(tt.Texts(), w) {
 			t.Fatalf("missing %q in %q", w, tt.Texts())
 		}
@@ -143,7 +143,7 @@ func TestOverviewShowsGPUAndBatteryWhenPresent(t *testing.T) {
 	}
 	app := testApp(hub.HostView{Snap: snap})
 	tt := ui.NewTester(app.View, 1200, 800)
-	for _, want := range []string{"Apple M3", "12.5 %", "Battery", "80.0 %", "Uptime 3h 2m"} {
+	for _, want := range []string{"Apple M3", "12 %", "Battery", "80 %", "Uptime 3h 2m"} {
 		if !slices.Contains(tt.Texts(), want) {
 			t.Fatalf("missing %q in %q", want, tt.Texts())
 		}
@@ -157,7 +157,7 @@ func TestApplyCopiesAndReplaces(t *testing.T) {
 	app.Apply("h1", hub.HostView{Snap: snap})
 	snap.CPU.Total = 99 // mutation after Apply must not leak into the view
 	tt.Frame()
-	if !slices.Contains(tt.Texts(), "50.0 %") || slices.Contains(tt.Texts(), "99.0 %") {
+	if !slices.Contains(tt.Texts(), "50 %") || slices.Contains(tt.Texts(), "99 %") {
 		t.Fatalf("Apply did not copy: %q", tt.Texts())
 	}
 }
