@@ -96,7 +96,7 @@ func energySnap(b *model.Battery) *model.Snapshot {
 func TestEnergyShowsChargePowerThermalAndAssertions(t *testing.T) {
 	tt := render(pages.Energy, view(energySnap(battery()), nil, "darwin"))
 	has(t, tt, "87%", "Charging", "Until Full", "1h 15m", "Battery Flow", "12.5 W", "charging",
-		"Adapter", "Connected", "Nominal", "Power", "The battery's flow", "Average", "Peak", "Thermal", "Cool",
+		"Adapter", "Connected", "Normal", "Power", "The battery's flow", "Average", "Peak", "Thermal", "Cool",
 		"Temperatures", "Battery", "31 °C", "Keeping Awake", "caffeinate", "Running a build", "● System",
 		"Power Source", "Drawing from", "Power Adapter", "87% · Charging")
 	lacks(t, tt, "On battery", "Nothing is keeping the Mac awake.")
@@ -142,7 +142,7 @@ func TestEnergyThermalBadges(t *testing.T) {
 		label string
 		want  ui.Color
 	}{
-		"nominal":  {"Nominal", th.Success},
+		"nominal":  {"Normal", th.Success},
 		"fair":     {"Fair", th.Warning},
 		"serious":  {"Serious", th.Danger},
 		"critical": {"Critical", th.Danger},
@@ -173,7 +173,7 @@ func TestEnergyPartialIsUnknown(t *testing.T) {
 	s.Partial = []string{"battery"}
 	tt := render(pages.Energy, view(s, nil, "darwin"))
 	has(t, tt, "—")
-	lacks(t, tt, "87%", "Charging", "12.5 W", "31 °C", "Nominal", "caffeinate")
+	lacks(t, tt, "87%", "Charging", "12.5 W", "31 °C", "Normal", "caffeinate")
 }
 
 // TestEnergyGPUImages writes the GPU and Energy pages as PNGs for review.

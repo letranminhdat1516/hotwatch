@@ -175,39 +175,80 @@ func parseBrewInfo(src []byte) ([]Package, error) {
 	var doc struct {
 		Formulae []struct {
 			Name      string `json:"name"`
+			Desc      string `json:"desc"`
+			Homepage  string `json:"homepage"`
+			Tap       string `json:"tap"`
 			Outdated  bool   `json:"outdated"`
 			Installed []struct {
 				Version string `json:"version"`
+				Time    int64  `json:"time"`
 			} `json:"installed"`
 			Versions struct {
 				Stable string `json:"stable"`
 			} `json:"versions"`
 		} `json:"formulae"`
 		Casks []struct {
-			Token     string `json:"token"`
-			Version   string `json:"version"`
-			Installed string `json:"installed"`
-			Outdated  bool   `json:"outdated"`
+			Token         string            `json:"token"`
+			Desc          string            `json:"desc"`
+			Homepage      string            `json:"homepage"`
+			Tap           string            `json:"tap"`
+			Version       string            `json:"version"`
+			Installed     string            `json:"installed"`
+			InstalledTime int64             `json:"installed_time"`
+			Outdated      bool              `json:"outdated"`
+			AutoUpdates   bool              `json:"auto_updates"`
+			Artifacts     []json.RawMessage `json:"artifacts"`
 		} `json:"casks"`
 	}
 	if err := json.Unmarshal(src, &doc); err != nil {
 		return nil, fmt.Errorf("brew info: %w", err)
+	}
+	unix := func(s int64) time.Time {
+		if s <= 0 {
+			return time.Time{}
+		}
+		return time.Unix(s, 0)
 	}
 	var out []Package
 	for _, f := range doc.Formulae {
 		if len(f.Installed) == 0 {
 			continue
 		}
-		out = append(out, Package{Name: f.Name, Kind: "formula", Version: f.Installed[len(f.Installed)-1].Version,
-			Newest: f.Versions.Stable, Outdated: f.Outdated})
+		last := f.Installed[len(f.Installed)-1]
+		out = append(out, Package{Name: f.Name, Kind: "formula", Version: last.Version,
+			Newest: f.Versions.Stable, Outdated: f.Outdated, Desc: f.Desc, Homepage: f.Homepage, Tap: f.Tap,
+			Installed: unix(last.Time)})
 	}
 	for _, c := range doc.Casks {
 		if c.Installed == "" {
 			continue
 		}
-		out = append(out, Package{Name: c.Token, Kind: "cask", Version: c.Installed, Newest: c.Version, Outdated: c.Outdated})
+		out = append(out, Package{Name: c.Token, Kind: "cask", Version: c.Installed, Newest: c.Version, Outdated: c.Outdated,
+			Desc: c.Desc, Homepage: c.Homepage, Tap: c.Tap, Installed: unix(c.InstalledTime), AutoUpdates: c.AutoUpdates,
+			Apps: caskApps(c.Artifacts)})
 	}
 	return out, nil
+}
+
+// caskApps reads the app bundles among a cask's artifacts: entries shaped
+// {"app": ["Name.app", …]}; anything else is skipped.
+func caskApps(arts []json.RawMessage) []string {
+	var out []string
+	for _, a := range arts {
+		var art struct {
+			App []json.RawMessage `json:"app"`
+		}
+		if json.Unmarshal(a, &art) != nil {
+			continue
+		}
+		for _, x := range art.App {
+			var name string
+			if json.Unmarshal(x, &name) == nil && strings.HasSuffix(name, ".app") {
+				out = append(out, filepath.Base(name))
+			}
+		}
+	}
+	return out
 }
 
 // parseMise reads `mise ls --json` (tool → installed versions; the active

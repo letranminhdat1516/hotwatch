@@ -3,9 +3,11 @@ package pkgs
 import (
 	"context"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseBrewInfo(t *testing.T) {
@@ -18,13 +20,15 @@ func TestParseBrewInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Package{
-		{Name: "go", Kind: "formula", Version: "1.27.0", Newest: "1.27.1", Outdated: true},
-		{Name: "node", Kind: "formula", Version: "24.9.0", Newest: "24.10.0", Outdated: true},
-		{Name: "ripgrep", Kind: "formula", Version: "15.1.0", Newest: "15.1.0"},
-		{Name: "visual-studio-code", Kind: "cask", Version: "1.49.2", Newest: "1.53.0", Outdated: true},
-		{Name: "iterm2", Kind: "cask", Version: "3.5.14", Newest: "3.5.14"},
+		{Name: "go", Kind: "formula", Version: "1.27.0", Newest: "1.27.1", Outdated: true, Tap: "homebrew/core"},
+		{Name: "node", Kind: "formula", Version: "24.9.0", Newest: "24.10.0", Outdated: true, Tap: "homebrew/core"},
+		{Name: "ripgrep", Kind: "formula", Version: "15.1.0", Newest: "15.1.0", Tap: "homebrew/core"},
+		{Name: "visual-studio-code", Kind: "cask", Version: "1.49.2", Newest: "1.53.0", Outdated: true,
+			Desc: "Open-source code editor", Tap: "homebrew/cask", Homepage: "https://code.visualstudio.com/", Installed: time.Unix(1772276104, 0),
+			AutoUpdates: true, Apps: []string{"Visual Studio Code.app"}},
+		{Name: "iterm2", Kind: "cask", Version: "3.5.14", Newest: "3.5.14", Tap: "homebrew/cask", Homepage: "https://iterm2.com/"},
 	}
-	if !slices.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got, want)
 	}
 }
@@ -40,7 +44,7 @@ func TestParseMise(t *testing.T) {
 		{Name: "node", Kind: "mise", Version: "24.9.0", Newest: "24.10.0", Outdated: true},
 		{Name: "python", Kind: "mise", Version: "3.13.5", Newest: "3.13.5"},
 	}
-	if !slices.Equal(got, want) {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got, want)
 	}
 }

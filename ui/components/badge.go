@@ -50,7 +50,7 @@ var states = map[string]stateLook{
 	"charging":        {Good, "Charging"},
 	"on battery":      {Attention, "On battery"},
 	"on ac":           {Neutral, "On AC"},
-	"nominal":         {Good, "Nominal"},
+	"nominal":         {Good, "Normal"},
 	"fair":            {Attention, "Fair"},
 	"serious":         {Bad, "Serious"},
 }

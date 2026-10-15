@@ -295,7 +295,7 @@ func powerSourceCard(c *ui.Context, b *model.Battery) {
 func thermalLabel(state string) (string, string) {
 	switch state {
 	case "nominal":
-		return "Nominal", "ok"
+		return "Normal", "ok"
 	case "fair":
 		return "Fair", "warn"
 	case "serious":

@@ -3,12 +3,21 @@
 // the Packages page; the contract and the Fake live here.
 package pkgs
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
-// Package is one installed formula, cask or mise tool.
+// Package is one installed formula, cask or mise tool. The details after
+// Outdated are Homebrew's; zero where it does not say.
 type Package struct {
 	Name, Kind, Version, Newest string // Kind "formula" | "cask" | "mise"
 	Outdated                    bool
+
+	Desc, Homepage, Tap string
+	Installed           time.Time
+	AutoUpdates         bool     // a cask whose app updates itself
+	Apps                []string // the app bundles a cask installs ("MongoDB Compass.app")
 }
 
 // Manager lists packages and runs tasks on them. Run starts the task and
