@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
@@ -8,35 +9,57 @@ import (
 
 	"hotwatch/hub"
 	"hotwatch/model"
+	"hotwatch/store"
 	"hotwatch/ui/components"
 	"hotwatch/ui/format"
 	"hotwatch/ui/icons"
 )
 
-// Page is one item of the top bar.
+// Page is one row of the sidebar.
 type Page struct {
 	Key, Title string
 	icon       *ui.SVG
 	needs      func(model.Caps) bool // nil: every host has it
 }
 
-// Pages in top bar order (R23).
-var Pages = []Page{
-	{Key: "overview", Title: "Overview", icon: icons.Overview},
-	{Key: "cpu", Title: "CPU", icon: icons.CPU},
-	{Key: "memory", Title: "Memory", icon: icons.Memory},
-	{Key: "disk", Title: "Disk", icon: icons.Disk},
-	{Key: "network", Title: "Network", icon: icons.Network},
-	{Key: "gpu", Title: "GPU", icon: icons.GPU, needs: func(c model.Caps) bool { return c.GPU }},
-	{Key: "energy", Title: "Energy", icon: icons.Energy, needs: func(c model.Caps) bool { return c.Battery }},
-	{Key: "processes", Title: "Processes", icon: icons.Processes},
-	{Key: "docker", Title: "Docker", icon: icons.Docker, needs: func(c model.Caps) bool { return c.Docker }},
-	{Key: "apps", Title: "Apps", icon: icons.Apps, needs: func(c model.Caps) bool { return c.Apps }},
-	{Key: "packages", Title: "Packages", icon: icons.Packages, needs: func(c model.Caps) bool { return c.Packages }},
-	{Key: "settings", Title: "Settings", icon: icons.Settings},
+// group is a labelled block of sidebar rows.
+type group struct {
+	title string // "" for the top, label-less block
+	pages []Page
 }
 
-// visiblePages are the pages a host with caps can show.
+// Sidebar groups, in order.
+var groups = []group{
+	{pages: []Page{
+		{Key: "overview", Title: "Overview", icon: icons.Overview},
+		{Key: "processes", Title: "Processes", icon: icons.Processes},
+	}},
+	{title: "Hardware", pages: []Page{
+		{Key: "cpu", Title: "CPU", icon: icons.CPU},
+		{Key: "memory", Title: "Memory", icon: icons.Memory},
+		{Key: "gpu", Title: "GPU", icon: icons.GPU, needs: func(c model.Caps) bool { return c.GPU }},
+		{Key: "disk", Title: "Disk", icon: icons.Disk},
+		{Key: "network", Title: "Network", icon: icons.Network},
+		{Key: "energy", Title: "Energy", icon: icons.Energy, needs: func(c model.Caps) bool { return c.Battery }},
+	}},
+	{title: "System", pages: []Page{
+		{Key: "docker", Title: "Docker", icon: icons.Docker, needs: func(c model.Caps) bool { return c.Docker }},
+		{Key: "apps", Title: "Apps", icon: icons.Apps, needs: func(c model.Caps) bool { return c.Apps }},
+		{Key: "packages", Title: "Packages", icon: icons.Packages, needs: func(c model.Caps) bool { return c.Packages }},
+		{Key: "settings", Title: "Settings", icon: icons.Settings},
+	}},
+}
+
+// Pages is every page in sidebar order (used by shortcuts and page lookup).
+var Pages = func() []Page {
+	var out []Page
+	for _, g := range groups {
+		out = append(out, g.pages...)
+	}
+	return out
+}()
+
+// visiblePages are the pages a host with caps can show, in order.
 func visiblePages(caps model.Caps) []Page {
 	var out []Page
 	for _, p := range Pages {
@@ -47,17 +70,14 @@ func visiblePages(caps model.Caps) []Page {
 	return out
 }
 
-// DefaultPanelWidth is the host panel's width until the user drags it.
-const DefaultPanelWidth = 260
+// SidebarWidth is the fixed width of the left navigation.
+const SidebarWidth = 216
 
-// Shell builds the window every page shares: the top bar (pages left, the
-// selected host and its connection right), the page title, a banner when
-// the host is not online, the page's content and the host panel on the
-// right, in a split the user resizes. Pages build only content.
-func Shell(c *ui.Context, a *App, hostPanel func(c *ui.Context), content func()) {
+// Shell builds the window every page shares: a left sidebar (navigation with
+// live values and a host switcher) and the page's content on the right.
+func Shell(c *ui.Context, a *App, content func()) {
 	c.SetTheme(themeFor(c.Theme().Dark))
 	t := c.Theme()
-	// A host chosen by a shortcut last frame is selected before any view is read.
 	if id := a.nextHost; id != "" {
 		a.nextHost = ""
 		a.selectHost(id)
@@ -65,10 +85,8 @@ func Shell(c *ui.Context, a *App, hostPanel func(c *ui.Context), content func())
 	v := a.views[a.selected]
 	now := a.now()
 
-	// The top bar's tab changed a.tab after the last frame's input.
-	if a.tab >= 0 && a.tab < len(a.tabKeys) && a.tabKeys[a.tab] != a.page {
-		a.setPage(a.tabKeys[a.tab])
-	}
+	// a.page is the single source of truth: sidebar rows and shortcuts both
+	// call setPage; a.tab is derived below for anything that still reads it.
 	pages := visiblePages(v.Info.Caps)
 	a.tabKeys = a.tabKeys[:0]
 	for _, p := range pages {
@@ -82,18 +100,19 @@ func Shell(c *ui.Context, a *App, hostPanel func(c *ui.Context), content func())
 	title := pages[a.tab].Title
 
 	w, _ := c.Size()
-	if w != a.lastW {
-		a.split, a.lastW = max(w-1-a.panelW, 0), w
-	} else {
-		a.panelW = w - 1 - a.split
-	}
+	a.split = max(w-SidebarWidth, 0) // content width, read by the Processes page
 
-	ui.Column(c).Fill().FontFeatures("tnum").Children(func() {
-		a.topBar(c, pages, v, now)
-		ui.Split(c, &a.split, func() {
+	ui.Row(c).Fill().AlignItems(ui.Stretch).FontFeatures("tnum").Children(func() {
+		a.sidebar(c, v, now)
+		ui.Column(c).Grow(1).Background(t.Background).Children(func() {
 			ui.Scroll(c).Fill().Children(func() {
-				ui.Column(c).Padding(3 * components.Grid).Gap(2 * components.Grid).Children(func() {
-					ui.Text(c, title).FontSize(22).FontWeight(700)
+				ui.Column(c).Padding(3*components.Grid).Gap(2*components.Grid).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(2*components.Grid).Children(func() {
+						ui.Text(c, title).FontSize(24).FontWeight(700).Grow(1)
+						if v.Conn.State == hub.Online && !v.Conn.LastOK.IsZero() {
+							ui.Text(c, "Updated "+format.Ago(now.Sub(v.Conn.LastOK))).FontSize(12).TextColor(t.TextMuted).NoWrap()
+						}
+					})
 					a.noticeBanner(c)
 					if kind, text, ok := banner(v.Conn, now); ok {
 						ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
@@ -104,111 +123,209 @@ func Shell(c *ui.Context, a *App, hostPanel func(c *ui.Context), content func())
 					content()
 				})
 			})
-		}, func() {
-			ui.Column(c).Fill().Background(t.Surface).Children(func() { hostPanel(c) })
-		}).Grow(1)
+		})
 	})
 	if !v.Conn.LastOK.IsZero() {
 		c.After(time.Second) // ages tick
 	}
 }
 
-// Top bar text styles; topBarWidth measures with the same ones.
-var (
-	brandSpan = ui.Span{Text: "Hotwatch", Size: 15, Weight: 700}
-	tabSpan   = ui.Span{Size: 13, Weight: 500}
-	hostSpan  = ui.Span{Size: 13, Weight: 600}
-)
-
-// Room the top bar's parts take besides their text, in DIPs.
-const (
-	tabChrome  = 2*10 + 14 + 6 + 2 // padding, icon, gap, list gap
-	hostChrome = 14 + 8 + 8 + 110  // icon, gaps, a badge
-	barChrome  = 4*2*components.Grid + 2*components.Grid
-)
-
-// topBarWidth estimates how wide the top bar is with every tab labelled,
-// without the brand and the update age.
-func topBarWidth(c *ui.Context, pages []Page, host string) float32 {
-	var w float32
-	for _, p := range pages {
-		s := tabSpan
-		s.Text = p.Title
-		tw, _ := c.MeasureText(0, s)
-		w += tw + tabChrome
-	}
-	hs := hostSpan
-	hs.Text = host
-	hw, _ := c.MeasureText(0, hs)
-	return w + hw + hostChrome + barChrome
+// sidebar draws the left navigation: the grouped page rows with live values,
+// and the host switcher pinned to the bottom.
+func (a *App) sidebar(c *ui.Context, v hub.HostView, now time.Time) {
+	t := c.Theme()
+	caps := v.Info.Caps
+	ui.Column(c).Width(SidebarWidth).Background(t.Surface).
+		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+		ui.Scroll(c).Grow(1).Children(func() {
+			ui.Column(c).Padding(components.Grid+2, components.Grid).Gap(components.Grid/2).Children(func() {
+				ui.Row(c).Padding(components.Grid/2, components.Grid, components.Grid, components.Grid).Children(func() {
+					ui.Text(c, "Hotwatch").FontSize(15).FontWeight(700).TextColor(t.Accent)
+				})
+				for gi, g := range groups {
+					rows := make([]Page, 0, len(g.pages))
+					for _, p := range g.pages {
+						if p.needs == nil || p.needs(caps) {
+							rows = append(rows, p)
+						}
+					}
+					if len(rows) == 0 {
+						continue
+					}
+					_ = gi
+					if g.title != "" {
+						ui.Text(c, g.title).FontSize(11).FontWeight(600).TextColor(t.TextMuted).
+							Padding(2*components.Grid, components.Grid, components.Grid/2, components.Grid)
+					}
+					for _, p := range rows {
+						a.navRow(c, p, v)
+					}
+				}
+			})
+		})
+		a.hostSwitcher(c, v, now)
+	})
 }
 
-// topBar shows the pages and the selected host. When the window is too
-// narrow, the brand and the update age go first; then the tabs other than
-// the open one show only their icon (named for assistive technology and in
-// a tooltip).
-func (a *App) topBar(c *ui.Context, pages []Page, v hub.HostView, now time.Time) {
+// navRow is one sidebar page row: a colour-tiled icon, the title, and the
+// metric's live value. The selected row is an accent pill.
+func (a *App) navRow(c *ui.Context, p Page, v hub.HostView) {
 	t := c.Theme()
-	h, ok := a.host()
-	updated := ""
-	if v.Conn.State == hub.Online && !v.Conn.LastOK.IsZero() {
-		updated = "Updated " + format.Ago(now.Sub(v.Conn.LastOK))
+	selected := p.Key == a.page
+	row := ui.Row(c).Key("nav-"+p.Key).AlignItems(ui.Center).Gap(components.Grid+2).
+		Padding(5, components.Grid).Radius(components.Grid)
+	switch {
+	case selected:
+		row.Background(t.Accent)
+	case row.Hovered():
+		row.Background(t.SurfaceHover)
 	}
-	w, _ := c.Size()
-	need := topBarWidth(c, pages, h.Name)
-	brandW, _ := c.MeasureText(0, brandSpan)
-	updW, _ := c.MeasureText(0, ui.Span{Text: updated, Size: 12})
-	full := need+brandW+updW+2*2*components.Grid <= w
-	compact := need > w
-	ui.Row(c).Height(7*components.Grid).PaddingX(2*components.Grid).Gap(2*components.Grid).
-		Background(t.Surface).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
-		if full {
-			ui.Text(c, brandSpan.Text).FontSize(brandSpan.Size).FontWeight(brandSpan.Weight).TextColor(t.Accent).NoWrap()
+	if row.Clicked() {
+		a.setPage(p.Key)
+	}
+	label, value := t.Text, t.TextMuted
+	if selected {
+		label, value = t.AccentText, t.AccentText.Alpha(0.85)
+	}
+	tileBg := t.SurfaceHover
+	iconCol := t.TextMuted
+	if col, ok := components.MetricColor(p.Key); ok {
+		tileBg, iconCol = col, ui.Hex("#ffffff")
+	}
+	if selected {
+		tileBg = t.AccentText.Alpha(0.22)
+		iconCol = t.AccentText
+	}
+	row.Children(func() {
+		components.IconTile(c, p.icon, tileBg, iconCol)
+		ui.Text(c, p.Title).FontSize(13).FontWeight(500).TextColor(label).Grow(1).NoWrap()
+		if s := navValue(p.Key, v.Snap); s != "" {
+			ui.Text(c, s).FontSize(12).TextColor(value).NoWrap()
 		}
-		tabs := ui.TabsBase(c, &a.tab, len(pages))
-		tabs.List.Gap(2).Label("Pages").Children(func() {
-			for i, p := range pages {
-				tab := tabs.Tab(i).Gap(6).Padding(6, 10).Radius(components.Grid)
-				col := t.TextMuted
-				switch {
-				case i == a.tab:
-					tab.Background(t.Accent.Alpha(0.12))
-					col = t.Accent
-				case tab.Hovered():
-					tab.Background(t.SurfaceHover)
-					col = t.Text
+	})
+}
+
+// navValue is the compact live value shown on a hardware row.
+func navValue(page string, s *model.Snapshot) string {
+	if s == nil {
+		return ""
+	}
+	pct := func(v float64) string { return fmt.Sprintf("%.0f%%", v) }
+	switch page {
+	case "cpu":
+		return pct(s.CPU.Total)
+	case "memory":
+		if s.Memory.Total == 0 {
+			return ""
+		}
+		return pct(float64(s.Memory.Used) / float64(s.Memory.Total) * 100)
+	case "gpu":
+		if len(s.GPUs) > 0 && s.GPUs[0].UtilPct != nil {
+			return pct(*s.GPUs[0].UtilPct)
+		}
+	case "disk":
+		var sum float64
+		ok := false
+		for _, d := range s.Disks {
+			for _, r := range []*float64{d.ReadBps, d.WriteBps} {
+				if r != nil {
+					sum += *r
+					ok = true
 				}
-				labelled := !compact || i == a.tab
-				if !labelled {
-					tab.Label(p.Title).Tooltip(p.Title)
+			}
+		}
+		if ok {
+			return format.Rate(&sum)
+		}
+	case "network":
+		var sum float64
+		ok := false
+		for _, i := range s.Net {
+			if i.Name == "lo" || i.Name == "lo0" || !i.Up {
+				continue
+			}
+			for _, r := range []*float64{i.RxBps, i.TxBps} {
+				if r != nil {
+					sum += *r
+					ok = true
 				}
-				tab.Children(func() {
-					ui.Icon(c, p.icon).FontSize(14).TextColor(col)
-					if labelled {
-						ui.Text(c, p.Title).FontSize(tabSpan.Size).FontWeight(tabSpan.Weight).TextColor(col).NoWrap()
-					}
+			}
+		}
+		if ok {
+			return format.Rate(&sum)
+		}
+	case "energy":
+		if s.Battery != nil {
+			return pct(s.Battery.ChargePct)
+		}
+	}
+	return ""
+}
+
+// hostSwitcher is the bottom block: the current host, and on click an inline
+// list of the other hosts to switch to.
+func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
+	t := c.Theme()
+	cur, _ := a.host()
+	ui.Column(c).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Padding(components.Grid).Gap(2).Children(func() {
+		if a.hostMenuOpen {
+			for _, h := range a.hosts {
+				if h.ID == a.selected {
+					continue
+				}
+				item := ui.Row(c).Key("hs-"+h.ID).AlignItems(ui.Center).Gap(components.Grid).
+					Padding(6, components.Grid).Radius(components.Grid)
+				if item.Hovered() {
+					item.Background(t.SurfaceHover)
+				}
+				if item.Clicked() {
+					a.selectHost(h.ID)
+					a.hostMenuOpen = false
+				}
+				item.Children(func() {
+					ui.Box(c).Size(8, 8).Radius(4).Background(components.StateColor(t, string(a.views[h.ID].Conn.State)))
+					ui.Text(c, h.Name).FontSize(13).SingleLine().Grow(1)
 				})
 			}
-		})
-		ui.Spacer(c)
-		if !ok {
-			return
 		}
-		ui.Row(c).Gap(components.Grid).Shrink(0).Children(func() {
-			ui.Icon(c, icons.Host).FontSize(14).TextColor(t.TextMuted)
-			ui.Text(c, h.Name).FontSize(hostSpan.Size).FontWeight(hostSpan.Weight).NoWrap()
-			if v.Conn.State != "" {
-				components.Badge(c, string(v.Conn.State))
-			}
-			if full && updated != "" {
-				ui.Text(c, updated).FontSize(12).TextColor(t.TextMuted).NoWrap()
-			}
+		btn := ui.Row(c).Key("host-switch").AlignItems(ui.Center).Gap(components.Grid).
+			Padding(6, components.Grid).Radius(components.Grid)
+		if btn.Hovered() {
+			btn.Background(t.SurfaceHover)
+		}
+		if btn.Clicked() {
+			a.hostMenuOpen = !a.hostMenuOpen
+		}
+		btn.Children(func() {
+			ui.Box(c).Size(10, 10).Radius(5).Background(components.StateColor(t, string(v.Conn.State)))
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, cur.Name).FontSize(13).FontWeight(600).SingleLine()
+				ui.Text(c, hostSubtitle(cur, v)).FontSize(11).TextColor(t.TextMuted).SingleLine()
+			})
+			ui.Icon(c, icons.ChevronDown).FontSize(14).TextColor(t.TextMuted)
 		})
 	})
 }
 
-// banner is the notice under the page title for a host that is not online;
-// ages are computed from conn.LastOK at render time.
+// hostSubtitle is the small line under the host name: its machine, or its
+// connection state when not online.
+func hostSubtitle(h store.Host, v hub.HostView) string {
+	if v.Conn.State != hub.Online {
+		if v.Conn.State == "" {
+			return "—"
+		}
+		return string(v.Conn.State)
+	}
+	if v.Snap != nil && v.Snap.Uptime > 0 {
+		return "Up " + format.Duration(v.Snap.Uptime)
+	}
+	if v.Info.OS != "" {
+		return v.Info.OS
+	}
+	return "Online"
+}
+
+// banner is the notice under the page title for a host that is not online.
 func banner(conn hub.Conn, now time.Time) (components.BannerKind, string, bool) {
 	age := func(prefix string) string {
 		if conn.LastOK.IsZero() {

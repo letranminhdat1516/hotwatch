@@ -103,6 +103,9 @@ func TestShellFallsBackToOverviewWhenPageHidden(t *testing.T) {
 	if err := tt.Click("Energy"); err != nil {
 		t.Fatal(err)
 	}
+	if err := tt.Click("Mac"); err != nil { // open the host switcher
+		t.Fatal(err)
+	}
 	if err := tt.Click("VPS"); err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +190,12 @@ func TestShellDarkModeSwitchesTokens(t *testing.T) {
 }
 
 func TestShellNarrowWindowKeepsEveryPageReachable(t *testing.T) {
+	// The sidebar keeps every page as a labelled row even in a small window.
 	tt := ui.NewTester(testApp(hub.HostView{Info: model.HostInfo{Caps: macCaps}}).View, 900, 700)
-	if r, ok := tt.Find("Packages"); !ok || r.W > 40 {
-		t.Fatalf("Packages tab %v (found %v), want an icon-only tab", r, ok)
+	if _, ok := tt.Find("Packages"); !ok {
+		t.Fatalf("Packages row not found: %q", tt.Texts())
 	}
-	if err := tt.Click("Packages"); err != nil { // by the tab's label
+	if err := tt.Click("Packages"); err != nil {
 		t.Fatal(err)
 	}
 	if count(tt, "Packages") != 2 {

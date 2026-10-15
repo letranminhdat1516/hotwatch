@@ -52,7 +52,7 @@ func Card(c *ui.Context, title, value, unit string, details []string, series []f
 			if unit == "%" {
 				ceiling = 100
 			}
-			Sparkline(c, series, ceiling).Margin(Grid/2, 0, 0, 0)
+			Sparkline(c, series, ceiling, t.Accent).Margin(Grid/2, 0, 0, 0)
 		}
 	})
 }

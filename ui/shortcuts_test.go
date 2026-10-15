@@ -34,7 +34,7 @@ func lastNav(r []navRec) navRec {
 
 func TestCmdNumberSelectsPage(t *testing.T) {
 	tt, rec := navApp(t)
-	tt.Key(ui.Cmd, ui.Key2)
+	tt.Key(ui.Cmd, ui.Key3) // sidebar order: Overview, Processes, CPU, …
 	if want := (navRec{"mac", "cpu"}); len(*rec) == 0 || lastNav(*rec) != want {
 		t.Fatalf("selected %v, want last %v", *rec, want)
 	}
@@ -47,9 +47,9 @@ func TestCmdNumbersFollowVisiblePages(t *testing.T) {
 	tt, rec := navApp(t)
 	tt.Key(ui.Cmd|ui.Alt, ui.KeyDown) // VPS: no GPU, Energy
 	*rec = nil
-	// Overview CPU Memory Disk Network Processes Docker Settings
+	// Overview Processes CPU Memory Disk Network Docker Settings
 	tt.Key(ui.Cmd, ui.Key6)
-	if got := lastNav(*rec); got != (navRec{"vps", "processes"}) {
+	if got := lastNav(*rec); got != (navRec{"vps", "network"}) {
 		t.Fatalf("⌘6 on the VPS: %v", *rec)
 	}
 	if count(tt, "Energy") != 0 {
@@ -164,9 +164,9 @@ func TestShortcutsWorkWhileSearchFocused(t *testing.T) {
 	if got := lastNav(*rec).page; got != "processes" {
 		t.Fatalf("typing digits changed the page: %v", *rec)
 	}
-	tt.Key(ui.Cmd, ui.Key2)
+	tt.Key(ui.Cmd, ui.Key3)
 	if got := lastNav(*rec).page; got != "cpu" {
-		t.Fatalf("Cmd+2 with search focused: %v", *rec)
+		t.Fatalf("Cmd+3 with search focused: %v", *rec)
 	}
 }
 
@@ -178,9 +178,9 @@ func TestEveryVisiblePageRenders(t *testing.T) {
 		titles []string
 	}{
 		"mac": {model.Caps{GPU: true, Battery: true, Processes: true},
-			[]string{"Overview", "CPU", "Memory", "Disk", "Network", "GPU", "Energy", "Processes"}},
+			[]string{"Overview", "Processes", "CPU", "Memory", "GPU", "Disk", "Network", "Energy"}},
 		"vps": {model.Caps{Docker: true, Processes: true},
-			[]string{"Overview", "CPU", "Memory", "Disk", "Network", "Processes", "Docker"}},
+			[]string{"Overview", "Processes", "CPU", "Memory", "Disk", "Network", "Docker"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			hosts := []store.Host{{ID: "h", Name: "Host", Kind: "agent"}}
@@ -192,7 +192,7 @@ func TestEveryVisiblePageRenders(t *testing.T) {
 					tt.Key(ui.Cmd, keys[i])
 				}
 				if n := count(tt, title); n < 2 {
-					t.Errorf("%s: title shown %d times, want top bar and page title: %q", title, n, tt.Texts())
+					t.Errorf("%s: title shown %d times, want sidebar row and page title: %q", title, n, tt.Texts())
 				}
 				if count(tt, notBuilt) != 0 {
 					t.Errorf("%s: shown as not built yet", title)

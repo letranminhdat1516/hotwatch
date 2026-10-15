@@ -35,4 +35,7 @@ var (
 	Host      = load("server")
 	Offline   = load("wifi-off")
 	Warning   = load("triangle-alert")
+
+	ChevronDown = load("chevron-down")
+	ChevronRight = load("chevron-right")
 )

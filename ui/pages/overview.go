@@ -13,11 +13,14 @@ import (
 	"hotwatch/model"
 	"hotwatch/ui/components"
 	"hotwatch/ui/format"
+	"hotwatch/ui/icons"
 )
 
-// card is one metric card: a title, a headline value and its unit, detail
-// lines, and an optional sparkline.
+// card is one metric card: a coloured icon and title, a headline value and
+// its unit, detail lines, and an optional sparkline.
 type card struct {
+	key     string // metric key for icon and colour
+	icon    *ui.SVG
 	title   string
 	value   string // headline number; format.Unknown when not known, "" for none
 	unit    string
@@ -40,10 +43,121 @@ func Overview(c *ui.Context, v hub.HostView, now time.Time) {
 				if cd.series != "" && v.Hist != nil {
 					series = recent(v.Hist.Series(cd.series), now)
 				}
-				components.Card(c, cd.title, cd.value, cd.unit, cd.details, series)
+				overviewCard(c, cd, series)
 			}
 		})
+		overviewExtras(c, v)
 		ui.Text(c, "Uptime "+format.Duration(s.Uptime)).FontSize(12).TextColor(c.Theme().TextMuted)
+	})
+}
+
+// overviewExtras is the analytics row under the metric cards: a Memory by
+// Type donut and a Memory by App breakdown, each shown only when its data is
+// available for this host.
+func overviewExtras(c *ui.Context, v hub.HostView) {
+	s := v.Snap
+	t := c.Theme()
+	memKnown := !partial(s, "memory") && s.Memory.Total > 0
+	apps := byApp(v.Procs)
+	if !memKnown && len(apps) == 0 {
+		return
+	}
+	g := float32(components.Grid)
+	ui.Row(c).Gap(2 * g).Wrap().AlignItems(ui.Stretch).Children(func() {
+		if memKnown {
+			segs := segments(s.Memory, v.Info.OS)
+			components.Surface(c, ui.Column(c).Width(46 * g).Gap(g)).Children(func() {
+				overviewSectionHeader(c, icons.Memory, "Memory by Type", "memory")
+				ui.Row(c).Gap(2 * g).AlignItems(ui.Center).Children(func() {
+					components.Donut(c, segs, 15*g)
+					components.SegLegend(c, segs)
+				})
+			})
+		}
+		if len(apps) > 0 {
+			var maxRSS uint64
+			for _, a := range apps {
+				maxRSS = max(maxRSS, a.rss)
+			}
+			components.Surface(c, ui.Column(c).Width(46 * g).Gap(g)).Children(func() {
+				overviewSectionHeader(c, icons.Apps, "Memory by App", "")
+				ui.Column(c).Gap(g - 2).Children(func() {
+					for _, a := range apps {
+						pct := 0.0
+						if maxRSS > 0 {
+							pct = float64(a.rss) / float64(maxRSS) * 100
+						}
+						ui.Row(c).Key(a.name).Gap(g).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, a.name).FontSize(12).TextColor(t.Text).Width(16 * g).SingleLine()
+							track := ui.Box(c).Grow(1).Height(8).Radius(4).Background(t.Border)
+							fill := min(max(pct/100, 0), 1)
+							track.Draw(func(p *ui.Painter, r ui.Rect) {
+								if fill > 0 {
+									p.Fill(ui.Rect{X: r.X, Y: r.Y, W: max(r.W*float32(fill), 8), H: r.H}, t.Accent, 4)
+								}
+							})
+							ui.Text(c, format.Bytes(a.rss)).FontSize(12).FontWeight(600).Width(10 * g).TextAlign(ui.End).SingleLine()
+						})
+					}
+				})
+			})
+		}
+	})
+}
+
+// overviewSectionHeader is the title row of an analytics card: a tinted icon
+// tile and the title in the metric colour (or plain when key has none).
+func overviewSectionHeader(c *ui.Context, icon *ui.SVG, title, key string) {
+	t := c.Theme()
+	tint := t.Text
+	if col, ok := components.MetricColor(key); ok {
+		tint = col
+	}
+	tileBg := t.SurfaceHover
+	iconCol := t.TextMuted
+	if col, ok := components.MetricColor(key); ok {
+		tileBg, iconCol = col, ui.Hex("#ffffff")
+	}
+	ui.Row(c).AlignItems(ui.Center).Gap(components.Grid).Children(func() {
+		components.IconTile(c, icon, tileBg, iconCol)
+		ui.Text(c, title).FontSize(13).FontWeight(600).TextColor(tint).SingleLine()
+	})
+}
+
+// overviewCard draws one metric card: a coloured icon-and-title header with a
+// chevron, the headline value and unit, detail lines, then the sparkline.
+func overviewCard(c *ui.Context, cd card, series []float64) {
+	t := c.Theme()
+	tint := t.TextMuted
+	if col, ok := components.MetricColor(cd.key); ok {
+		tint = col
+	}
+	components.Surface(c, ui.Column(c).Width(components.CardWidth).Gap(components.Grid/2)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(components.Grid).Children(func() {
+			if cd.icon != nil {
+				components.IconTile(c, cd.icon, tint, ui.Hex("#ffffff"))
+			}
+			ui.Text(c, cd.title).FontSize(13).FontWeight(600).TextColor(tint).SingleLine().Grow(1)
+			ui.Icon(c, icons.ChevronRight).FontSize(14).TextColor(t.TextMuted)
+		})
+		if cd.value != "" {
+			spans := []ui.Span{{Text: cd.value, Size: 28, Weight: 600}}
+			if cd.unit != "" && cd.value != format.Unknown {
+				spans = append(spans, ui.Span{Text: " " + cd.unit, Size: 15, Weight: 500, Color: t.TextMuted})
+			}
+			ui.RichText(c, spans...).SingleLine()
+		}
+		for _, d := range cd.details {
+			ui.Text(c, d).FontSize(12).TextColor(t.TextMuted).SingleLine()
+		}
+		if series != nil {
+			ui.Spacer(c)
+			ceiling := 0.0
+			if cd.unit == "%" {
+				ceiling = 100
+			}
+			components.Sparkline(c, series, ceiling, tint).Margin(components.Grid/2, 0, 0, 0)
+		}
 	})
 }
 
@@ -99,7 +213,7 @@ func sumRate(rates []*float64) *float64 {
 func cards(s *model.Snapshot) []card {
 	var out []card
 
-	cpu := card{title: "CPU", value: format.Unknown, unit: "%", series: "cpu"}
+	cpu := card{key: "cpu", icon: icons.CPU, title: "CPU", value: format.Unknown, unit: "%", series: "cpu"}
 	load := format.Unknown
 	if !partial(s, "cpu") {
 		cpu.value = format.Number(ptr(s.CPU.Total))
@@ -108,7 +222,7 @@ func cards(s *model.Snapshot) []card {
 	cpu.details = []string{"Load " + load}
 	out = append(out, cpu)
 
-	mem := card{title: "Memory", value: format.Unknown, unit: "%", series: "mem"}
+	mem := card{key: "memory", icon: icons.Memory, title: "Memory", value: format.Unknown, unit: "%", series: "mem"}
 	memDetail := format.Unknown
 	if !partial(s, "memory") {
 		mem.value = format.Number(ratio(s.Memory.Used, s.Memory.Total))
@@ -119,7 +233,7 @@ func cards(s *model.Snapshot) []card {
 	mem.details = []string{memDetail}
 	out = append(out, mem)
 
-	disk := card{title: "Disk", value: format.Unknown, unit: "%"}
+	disk := card{key: "disk", icon: icons.Disk, title: "Disk", value: format.Unknown, unit: "%"}
 	diskDetail := format.Unknown
 	if !partial(s, "disks") && len(s.Disks) > 0 {
 		var used, total uint64
@@ -135,7 +249,7 @@ func cards(s *model.Snapshot) []card {
 	disk.details = []string{diskDetail}
 	out = append(out, disk)
 
-	net := card{title: "Network", value: "", series: "net.rx"}
+	net := card{key: "network", icon: icons.Network, title: "Network", value: "", series: "net.rx"}
 	rx, tx := format.Unknown, format.Unknown
 	if !partial(s, "net") {
 		var rxs, txs []*float64
@@ -155,7 +269,7 @@ func cards(s *model.Snapshot) []card {
 		if name == "" {
 			name = fmt.Sprintf("GPU %d", i+1)
 		}
-		gpu := card{title: name, value: format.Unknown, unit: "%", series: gpuSeries(i)}
+		gpu := card{key: "gpu", icon: icons.GPU, title: name, value: format.Unknown, unit: "%", series: gpuSeries(i)}
 		if !partial(s, "gpu") {
 			gpu.value = format.Number(g.UtilPct)
 			if g.MemUsed != nil && g.MemTotal != nil {
@@ -166,7 +280,7 @@ func cards(s *model.Snapshot) []card {
 	}
 
 	if b := s.Battery; b != nil {
-		bat := card{title: "Battery", value: format.Unknown, unit: "%"}
+		bat := card{key: "battery", icon: icons.Energy, title: "Battery", value: format.Unknown, unit: "%"}
 		if !partial(s, "battery") {
 			bat.value = format.Number(ptr(b.ChargePct))
 			state := "On battery"

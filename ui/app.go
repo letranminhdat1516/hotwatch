@@ -10,7 +10,6 @@ import (
 	"hotwatch/hub"
 	"hotwatch/store"
 	"hotwatch/ui/components"
-	"hotwatch/ui/icons"
 	"hotwatch/ui/pages"
 )
 
@@ -42,20 +41,20 @@ type App struct {
 	pass     string                // the shown prompt's input
 	passOpen bool
 
-	// Shell state: the top bar's tab index into tabKeys (the last frame's
-	// visible pages), and the split between content and host panel.
-	tab     int
-	tabKeys []string
-	split   float32 // content width
-	panelW  float32
-	lastW   float32 // window width the split was last fitted to
+	// Shell state: the tab index into tabKeys (the last frame's visible
+	// pages) for keyboard navigation, the content width the Processes page
+	// reads, and whether the sidebar host switcher is expanded.
+	tab          int
+	tabKeys      []string
+	split        float32 // content width
+	hostMenuOpen bool
 }
 
 // NewApp seeds the per-host state from views(id) for each host. The first host
 // is selected and the Overview page shown.
 func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.Runner, onSelect func(hostID, page string)) *App {
 	a := &App{hosts: slices.Clone(hosts), actions: actions, onSelect: onSelect, page: "overview",
-		views: map[string]hub.HostView{}, now: time.Now, panelW: DefaultPanelWidth,
+		views: map[string]hub.HostView{}, now: time.Now,
 		acts: pages.NewActions(actions), procs: pages.NewProcesses(), docker: pages.NewDocker()}
 	a.procs.OnColumns = func(cols []string) {
 		if a.onColumns != nil {
@@ -69,6 +68,13 @@ func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.
 		a.selected = a.hosts[0].ID
 	}
 	return a
+}
+
+// SelectForShot sets the selected host and page directly, for the hwshot
+// render tool. Not used by the running app.
+func (a *App) SelectForShot(hostID, page string) {
+	a.selected = hostID
+	a.page = page
 }
 
 // Apply stores a copy of v for host id. Call it on the main thread.
@@ -170,7 +176,7 @@ func (a *App) selectHost(id string) {
 func (a *App) View(c *ui.Context) {
 	start := a.now()
 	v := a.views[a.selected]
-	Shell(c, a, a.drawHostPanel, func() {
+	Shell(c, a, func() {
 		switch a.page {
 		case "overview":
 			pages.Overview(c, v, a.now())
@@ -201,36 +207,3 @@ func (a *App) View(c *ui.Context) {
 	}
 }
 
-func (a *App) drawHostPanel(c *ui.Context) {
-	if a.panel != nil {
-		a.panel.Render(c, a.selected, func(id string) hub.HostView { return a.views[id] })
-		return
-	}
-	a.placeholderPanel(c)
-}
-
-// placeholderPanel is a flat list of the hosts, shown until SetHostPanel.
-func (a *App) placeholderPanel(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Padding(2*components.Grid, components.Grid).Gap(2).Children(func() {
-		ui.Text(c, "Hosts").FontSize(12).FontWeight(600).TextColor(t.TextMuted).Padding(0, components.Grid, components.Grid, components.Grid)
-		for _, h := range a.hosts {
-			row := ui.Row(c).Key(h.ID).Gap(components.Grid).Padding(6, components.Grid).Radius(components.Grid)
-			if h.ID == a.selected {
-				row.Background(t.Accent.Alpha(0.12))
-			} else if row.Hovered() {
-				row.Background(t.SurfaceHover)
-			}
-			if row.Clicked() {
-				a.selectHost(h.ID)
-			}
-			row.Children(func() {
-				ui.Icon(c, icons.Host).FontSize(14).TextColor(t.TextMuted)
-				ui.Text(c, h.Name).FontSize(13).SingleLine().Grow(1)
-				if st := a.views[h.ID].Conn.State; st != "" {
-					ui.Box(c).Size(8, 8).Radius(4).Background(components.StateColor(t, string(st)))
-				}
-			})
-		}
-	})
-}

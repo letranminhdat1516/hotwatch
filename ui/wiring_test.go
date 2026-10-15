@@ -49,6 +49,9 @@ func TestSetHostsDropsRemovedSelectedHost(t *testing.T) {
 		t.Fatalf("selection moved: %v", picked)
 	}
 	tt := ui.NewTester(app.View, 1200, 800)
+	if err := tt.Click("Studio"); err != nil { // open the host switcher
+		t.Fatal(err)
+	}
 	if !tt.HasText("Studio") || !tt.HasText("NAS") || tt.HasText("VPS") {
 		t.Fatalf("hosts not replaced: %q", tt.Texts())
 	}
