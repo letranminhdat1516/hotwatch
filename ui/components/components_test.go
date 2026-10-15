@@ -42,7 +42,7 @@ func TestDotTimeChartLegendPerSeriesInGivenOrder(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) {
 		components.DotTimeChart(c, "Network", "B/s", series, now, tint)
 	}, 600, 300)
-	for _, want := range []string{"B/s", "In", "2.0 KB/s", "Out", "1.0 KB/s"} {
+	for _, want := range []string{"B/s", "In", "2.00 KB/s", "Out", "1.00 KB/s"} {
 		if !slices.Contains(tt.Texts(), want) {
 			t.Errorf("missing %q in %q", want, tt.Texts())
 		}
@@ -162,7 +162,7 @@ func TestStackedBarLegend(t *testing.T) {
 			{Label: "App", Value: 8 << 30}, {Label: "Free", Value: 4 << 30},
 		})
 	}, 500, 100)
-	for _, want := range []string{"App", "8.0 GB", "Free", "4.0 GB"} {
+	for _, want := range []string{"App", "8.00 GB", "Free", "4.00 GB"} {
 		if !slices.Contains(tt.Texts(), want) {
 			t.Errorf("missing %q in %q", want, tt.Texts())
 		}

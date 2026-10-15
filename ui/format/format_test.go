@@ -13,8 +13,8 @@ func TestFormatBytes(t *testing.T) {
 		in   uint64
 		want string
 	}{
-		{0, "0 B"}, {1023, "1023 B"}, {1024, "1.0 KB"}, {1536, "1.5 KB"},
-		{1048575, "1.0 MB"}, {1048576, "1.0 MB"}, {1<<20 - 52, "1023.9 KB"}, {12345678901, "11.5 GB"}, {1 << 40, "1.0 TB"}, {1 << 50, "1.0 PB"}, {math.MaxUint64, "—"},
+		{0, "0 B"}, {1023, "1023 B"}, {1024, "1.00 KB"}, {1536, "1.50 KB"},
+		{1048575, "1.00 MB"}, {1048576, "1.00 MB"}, {1<<20 - 52, "1.00 MB"}, {12345678901, "11.5 GB"}, {1 << 40, "1.00 TB"}, {1 << 50, "1.00 PB"}, {math.MaxUint64, "—"},
 	} {
 		if got := Bytes(tc.in); got != tc.want {
 			t.Errorf("Bytes(%d) = %q, want %q", tc.in, got, tc.want)
@@ -27,9 +27,9 @@ func TestFormatRate(t *testing.T) {
 		in   *float64
 		want string
 	}{
-		{nil, "—"}, {f64(0), "0 B/s"}, {f64(1.2 * 1024 * 1024), "1.2 MB/s"}, {f64(2048), "2.0 KB/s"},
-		{f64(-5), "—"}, {f64(1023.6), "1.0 KB/s"}, {f64(1023.4), "1023 B/s"},
-		{f64(math.NaN()), "—"}, {f64(math.Inf(1)), "—"}, {f64(math.Inf(-1)), "—"}, {f64(1e30), "—"}, {f64(1023.9 * (1 << 50)), "1023.9 PB/s"}, {f64(1023.99 * (1 << 50)), "—"},
+		{nil, "—"}, {f64(0), "0 B/s"}, {f64(1.2 * 1024 * 1024), "1.20 MB/s"}, {f64(2048), "2.00 KB/s"},
+		{f64(-5), "—"}, {f64(1023.6), "1.00 KB/s"}, {f64(1023.4), "1023 B/s"},
+		{f64(math.NaN()), "—"}, {f64(math.Inf(1)), "—"}, {f64(math.Inf(-1)), "—"}, {f64(1e30), "—"}, {f64(1023.9 * (1 << 50)), "1024 PB/s"}, {f64(1025 * (1 << 50)), "—"},
 	} {
 		if got := Rate(tc.in); got != tc.want {
 			t.Errorf("Rate = %q, want %q", got, tc.want)
@@ -100,5 +100,27 @@ func TestFormatAgo(t *testing.T) {
 		if got := Ago(tc.in); got != tc.want {
 			t.Errorf("Ago(%v) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestBytesThreeSignificantDigits(t *testing.T) {
+	for n, want := range map[uint64]string{
+		0:           "0 B",
+		512:         "512 B",
+		5642:        "5.51 KB",
+		5779 << 10:  "5.64 MB",
+		5777 << 20:  "5.64 GB",
+		11468 << 20: "11.2 GB",
+		126 << 30:   "126 GB",
+		1023 << 30:  "1023 GB",
+		4198 << 30:  "4.10 TB",
+	} {
+		if got := Bytes(n); got != want {
+			t.Errorf("Bytes(%d) = %q, want %q", n, got, want)
+		}
+	}
+	r := 36.7 * (1 << 20)
+	if got := Rate(&r); got != "36.7 MB/s" {
+		t.Errorf("Rate = %q", got)
 	}
 }

@@ -39,6 +39,9 @@ func humanize(v, base float64, units [6]string) string {
 		v /= base
 		i++
 	}
+	if v >= base {
+		return Unknown // beyond the largest unit
+	}
 	if i == 0 {
 		if math.Round(v) < base {
 			return fmt.Sprintf("%.0f %s", v, units[0])
@@ -46,14 +49,23 @@ func humanize(v, base float64, units [6]string) string {
 		v /= base
 		i++
 	}
-	if math.Round(v*10)/10 >= base {
-		if i == len(units)-1 {
-			return Unknown
-		}
+	if math.Round(v) >= base && i < len(units)-1 {
 		v /= base
 		i++
 	}
-	return fmt.Sprintf("%.1f %s", v, units[i])
+	return sig3(v) + " " + units[i]
+}
+
+// sig3 prints v with three significant digits: "5.38", "11.2", "126"
+// (whole numbers from 100, so "1023" stays whole).
+func sig3(v float64) string {
+	switch {
+	case math.Round(v*100)/100 < 10:
+		return fmt.Sprintf("%.2f", v)
+	case math.Round(v*10)/10 < 100:
+		return fmt.Sprintf("%.1f", v)
+	}
+	return fmt.Sprintf("%.0f", v)
 }
 
 // Bytes formats n with a 1024 base: "12.3 GB".

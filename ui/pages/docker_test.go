@@ -178,7 +178,7 @@ func TestDockerShowsRowsGroupedByProject(t *testing.T) {
 	before(t, e.tt, "jobhunter-bot", "standalone")
 	before(t, e.tt, "jobhunter-bot", "jobhunter-db")
 	for _, want := range []string{"Running", "Exited", "Restarting", "Paused", "Created", "healthy", "12.5 %",
-		"256.0 MB / 1.0 GB", "8080/tcp", "3h 5m"} {
+		"256 MB / 1.00 GB", "8080/tcp", "3h 5m"} {
 		if pos(e.tt, want) < 0 {
 			t.Fatalf("missing %q in %q", want, e.tt.Texts())
 		}

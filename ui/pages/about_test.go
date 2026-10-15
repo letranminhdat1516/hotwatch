@@ -27,7 +27,7 @@ func TestAboutShowsHardwareSoftwareDisplaysAndStorage(t *testing.T) {
 	for _, want := range []string{"MacBook Pro (14-inch, 2025)", "Apple M5 · 24.0 GB", "macOS 26.1", "Up 28d 4h",
 		"Hardware", "Model identifier", "Mac17,1", "CPU cores", "10 (4 performance, 6 efficiency)", "GPU cores", "arm64",
 		"Software", "Build", "25B78", "Kernel", "Darwin 25.3.0", "Computer name", "cicca-mbp", "Processes", "623",
-		"Displays", "3024 × 1964", "Storage", "14.0 GB free of 494.0 GB"} {
+		"Displays", "3024 × 1964", "Storage", "14.0 GB free of 494 GB"} {
 		if !slices.Contains(tt.Texts(), want) {
 			t.Errorf("missing %q in %q", want, tt.Texts())
 		}

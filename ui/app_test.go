@@ -70,12 +70,12 @@ func TestOverviewPartialSectionIsUnknown(t *testing.T) {
 		absent  []string
 		unknown []string
 	}{
-		// Headlines: memory "4.0 GB" in use, disk "75.0 GB" free, network
-		// "2.0 KB/s" down, battery "80.0 %"; the partial section's figures
+		// Headlines: memory "4.00 GB" in use, disk "75.0 GB" free, network
+		// "2.00 KB/s" down, battery "80.0 %"; the partial section's figures
 		// are dashes, never zeros.
-		{"cpu", []string{"4.0 GB", "75.0 GB", "2.0 KB/s", "80.0 %", "Load 1m"}, []string{"37.5 %", "1.00", "2.00"}, []string{"—"}},
-		{"net", []string{"37.5 %", "4.0 GB", "80.0 %", "Downloading", "Uploading"}, []string{"2.0 KB/s", "1.0 KB/s"}, []string{"—"}},
-		{"battery", []string{"37.5 %", "4.0 GB", "2.0 KB/s"}, []string{"80.0 %"}, []string{"—"}},
+		{"cpu", []string{"4.00 GB", "75.0 GB", "2.00 KB/s", "80.0 %", "Load 1m"}, []string{"37.5 %", "1.00", "2.00"}, []string{"—"}},
+		{"net", []string{"37.5 %", "4.00 GB", "80.0 %", "Downloading", "Uploading"}, []string{"2.00 KB/s", "1.00 KB/s"}, []string{"—"}},
+		{"battery", []string{"37.5 %", "4.00 GB", "2.00 KB/s"}, []string{"80.0 %"}, []string{"—"}},
 	}
 	for _, tc := range cases {
 		snap := fullSnap()
@@ -104,7 +104,7 @@ func TestOverviewNetworkSkipsLoopbackAndDownInterfaces(t *testing.T) {
 	}}
 	tt := ui.NewTester(testApp(hub.HostView{Snap: snap}).View, 1200, 800)
 	// Downloading 1.0 KB/s from en0 only; Uploading a known 0 B/s.
-	if !slices.Contains(tt.Texts(), "1.0 KB/s") || !slices.Contains(tt.Texts(), "0 B/s") {
+	if !slices.Contains(tt.Texts(), "1.00 KB/s") || !slices.Contains(tt.Texts(), "0 B/s") {
 		t.Fatalf("texts %q", tt.Texts())
 	}
 	for _, bad := range []string{"5.0 KB/s", "9.0 KB/s", "7.0 KB/s", "14.0 KB/s"} {

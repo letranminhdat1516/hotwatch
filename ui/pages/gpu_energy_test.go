@@ -29,7 +29,7 @@ var rtx = model.GPU{Name: "RTX 3080", UtilPct: fp(42), MemUsed: u64(1717986918),
 
 func TestGPUShowsUtilisationVRAMAndTemperature(t *testing.T) {
 	tt := render(pages.GPU, view(gpuSnap(rtx), nil, "linux"))
-	has(t, tt, "RTX 3080", "Usage", "42.0 %", "VRAM", "16.0 %", "1.6 / 10.0 GB", "Temperature", "65.0 °C", "GPU utilisation", "%")
+	has(t, tt, "RTX 3080", "Usage", "42.0 %", "VRAM", "16.0 %", "1.60 / 10.0 GB", "Temperature", "65.0 °C", "GPU utilisation", "%")
 	lacks(t, tt, "—", "No supported GPU on this host")
 }
 
@@ -37,8 +37,8 @@ func TestGPUVRAMWithOnlyUsedKnown(t *testing.T) {
 	g := rtx
 	g.MemTotal = nil
 	tt := render(pages.GPU, view(gpuSnap(g), nil, "linux"))
-	has(t, tt, "VRAM", "1.6 GB")
-	lacks(t, tt, "1.6 / 10.0 GB", "16.0 %")
+	has(t, tt, "VRAM", "1.60 GB")
+	lacks(t, tt, "1.60 / 10.0 GB", "16.0 %")
 }
 
 func TestGPUUnknownValuesAreDashes(t *testing.T) {
@@ -63,7 +63,7 @@ func TestGPUPartialIsUnknown(t *testing.T) {
 	s.Partial = []string{"gpu"}
 	tt := render(pages.GPU, view(s, nil, "linux"))
 	has(t, tt, "—")
-	lacks(t, tt, "42.0 %", "65.0 °C", "1.6 / 10.0 GB", "GPU utilisation")
+	lacks(t, tt, "42.0 %", "65.0 °C", "1.60 / 10.0 GB", "GPU utilisation")
 }
 
 func TestGPUWaitsForData(t *testing.T) {

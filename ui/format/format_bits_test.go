@@ -5,7 +5,7 @@ import "testing"
 func TestRateInBits(t *testing.T) {
 	defer SetBitRates(false)
 	v := 1024.0
-	if got := Rate(&v); got != "1.0 KB/s" {
+	if got := Rate(&v); got != "1.00 KB/s" {
 		t.Fatalf("bytes: %q", got)
 	}
 	SetBitRates(true)
@@ -13,12 +13,12 @@ func TestRateInBits(t *testing.T) {
 		t.Fatal("BitRates not on")
 	}
 	cases := map[float64]string{
-		1024:   "8.2 kb/s",   // 8192 b/s, decimal units
-		125000: "1.0 Mb/s",   // one megabit per second
-		12.5e6: "100.0 Mb/s", //
-		30:     "240 b/s",    // under a kilobit: whole bits
-		1.25e9: "10.0 Gb/s",  //
-		-1:     Unknown,      // negative rates are unknown
+		1024:   "8.19 kb/s", // 8192 b/s, decimal units
+		125000: "1.00 Mb/s", // one megabit per second
+		12.5e6: "100 Mb/s",  //
+		30:     "240 b/s",   // under a kilobit: whole bits
+		1.25e9: "10.0 Gb/s", //
+		-1:     Unknown,     // negative rates are unknown
 	}
 	for in, want := range cases {
 		in := in
@@ -29,7 +29,7 @@ func TestRateInBits(t *testing.T) {
 	if Rate(nil) != Unknown {
 		t.Error("nil rate")
 	}
-	if Bytes(1024) != "1.0 KB" {
+	if Bytes(1024) != "1.00 KB" {
 		t.Error("Bytes must stay in bytes")
 	}
 }

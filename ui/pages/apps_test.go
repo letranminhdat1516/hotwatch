@@ -103,7 +103,7 @@ func TestAppsSizesOnlyVisibleRows(t *testing.T) {
 		t.Fatalf("%d size calls for a 400 px window: want only the visible rows", n)
 	}
 	// "App 000" is 7 characters: the fake sizes it at 7 MB, delivered inline.
-	if !slices.Contains(e.tt.Texts(), "7.0 MB") {
+	if !slices.Contains(e.tt.Texts(), "7.00 MB") {
 		t.Fatalf("no size shown after delivery: %q", e.tt.Texts()[:20])
 	}
 }

@@ -21,7 +21,7 @@ func TestSettingsPageChangesIntervalAndUnits(t *testing.T) {
 	app.SetSettings(store.Settings{IntervalMs: 2000})
 	app.SetSettingsHook(func(s store.Settings) { got = append(got, s) })
 	tt := ui.NewTester(app.View, 1200, 800)
-	if !slices.Contains(tt.Texts(), "1.0 KB/s") {
+	if !slices.Contains(tt.Texts(), "1.00 KB/s") {
 		t.Fatalf("sidebar rate in bytes missing: %q", tt.Texts())
 	}
 	tt.Key(ui.Cmd, ui.KeyComma)
@@ -43,15 +43,15 @@ func TestSettingsPageChangesIntervalAndUnits(t *testing.T) {
 	if len(got) != 2 || got[1].NetUnits != "bits" || got[1].IntervalMs != 5000 {
 		t.Fatalf("units hook calls %+v, want bits with the interval kept", got)
 	}
-	// The sidebar's network rate follows at once: 1024 B/s is 8.2 kb/s.
-	if !slices.Contains(tt.Texts(), "8.2 kb/s") || slices.Contains(tt.Texts(), "1.0 KB/s") {
+	// The sidebar's network rate follows at once: 1024 B/s is 8.19 kb/s.
+	if !slices.Contains(tt.Texts(), "8.19 kb/s") || slices.Contains(tt.Texts(), "1.00 KB/s") {
 		t.Fatalf("rates not in bits: %q", tt.Texts())
 	}
 	if err := tt.Click("Bytes/s"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !slices.Contains(tt.Texts(), "1.0 KB/s") {
+	if !slices.Contains(tt.Texts(), "1.00 KB/s") {
 		t.Fatalf("rates not back in bytes: %q", tt.Texts())
 	}
 }

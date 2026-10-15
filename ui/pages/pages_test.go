@@ -179,7 +179,7 @@ func TestPagesWaitForData(t *testing.T) {
 
 func TestMemoryDarwinSegments(t *testing.T) {
 	tt := render(pages.Memory, view(snap(), procs(), "darwin"))
-	has(t, tt, "App", "Wired", "Compressed", "Free", "Swap 1.0 GB / 4.0 GB", "Warning", "Memory usage")
+	has(t, tt, "App", "Wired", "Compressed", "Free", "Swap 1.00 GB / 4.00 GB", "Warning", "Memory usage")
 	lacks(t, tt, "Cached", "Buffers")
 }
 
@@ -220,7 +220,7 @@ func TestMemoryByAppGroupsBundles(t *testing.T) {
 		{PID: 5, Name: "Ghost", RSS: 0, AppBundle: "/Applications/Ghost.app"},
 	}
 	tt := render(pages.Memory, view(snap(), ps, "darwin"))
-	has(t, tt, "Memory by app", "Safari", "800.0 MB", "2", "zsh", "15.0 MB")
+	has(t, tt, "Memory by app", "Safari", "800 MB", "2", "zsh", "15.0 MB")
 	lacks(t, tt, "Ghost", "Safari.app", "/Applications/Safari.app")
 	linux := render(pages.Memory, view(snap(), ps, "linux"))
 	lacks(t, linux, "Memory by app")
@@ -229,13 +229,13 @@ func TestMemoryByAppGroupsBundles(t *testing.T) {
 
 func TestMemoryTopExcludesUnreadableRSS(t *testing.T) {
 	tt := render(pages.Memory, view(snap(), procs(), "darwin"))
-	has(t, tt, "Top processes by memory", "postgres", "2.0 GB", "python3")
+	has(t, tt, "Top processes by memory", "postgres", "2.00 GB", "python3")
 	lacks(t, tt, "unreadable")
 }
 
 func TestDiskNilRatesAreDashes(t *testing.T) {
 	tt := render(pages.Disk, view(snap(), procs(), "darwin"))
-	has(t, tt, "/", "apfs", "/data", "ext4", "1.0 MB/s", "—", "Read", "Write", "B/s")
+	has(t, tt, "/", "apfs", "/data", "ext4", "1.00 MB/s", "—", "Read", "Write", "B/s")
 	// "/data" has neither rate known.
 	n := 0
 	for _, x := range tt.Texts() {
@@ -260,7 +260,7 @@ func TestDiskPartialIsUnknown(t *testing.T) {
 
 func TestNetworkInterfacesSkipLoopback(t *testing.T) {
 	tt := render(pages.Network, view(snap(), procs(), "darwin"))
-	has(t, tt, "en0", "192.168.1.20, fe80::1", "Up", "5.0 MB/s", "utun3", "Down", "In", "Out")
+	has(t, tt, "en0", "192.168.1.20, fe80::1", "Up", "5.00 MB/s", "utun3", "Down", "In", "Out")
 	lacks(t, tt, "lo0", "127.0.0.1")
 }
 
