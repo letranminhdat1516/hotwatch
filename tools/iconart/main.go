@@ -1,7 +1,8 @@
 // Command iconart draws Hotwatch's app icon, resources/icon.png (1024 px).
 //
-// With -logo it places the owner's logo (a PNG on a white ground) on a
-// light squircle: the white ground is dropped, the logo cropped to what
+// With -logo it places the owner's logo (a PNG on a white or transparent
+// ground) on a black squircle, its black and grey parts turned white so
+// they read on black while its colours stay as they are: the white ground is dropped, the logo cropped to what
 // is drawn and centred. Without it, it draws a rose squircle with a white
 // gauge. Everything is computed here (signed distances, 4×4 supersampling,
 // area-averaged scaling).
@@ -31,7 +32,7 @@ const (
 )
 
 func main() {
-	logo := flag.String("logo", "", "the owner's logo, a PNG on white")
+	logo := flag.String("logo", "", "the owner's logo, a PNG on white or transparent")
 	flag.Parse()
 	out := "resources/icon.png"
 	if flag.NArg() > 0 {
@@ -53,7 +54,8 @@ func main() {
 	}
 }
 
-// logoIcon is the logo at path on a white squircle with a soft shadow.
+// logoIcon is the logo at path on a black squircle with a soft shadow;
+// neutral (black and grey) ink becomes white, coloured ink is kept.
 func logoIcon(path string) *image.NRGBA {
 	f, err := os.Open(path)
 	if err != nil {
@@ -96,9 +98,9 @@ func logoIcon(path string) *image.NRGBA {
 				img.SetNRGBA(px, py, color.NRGBA{A: u8(a)})
 				continue
 			}
-			// A white ground, barely warmer at the bottom.
+			// A black ground, lifted a little at the top.
 			t := clamp((y - 100) / 824)
-			r, g, bl := 1.0, 1.0-0.025*t, 1.0-0.02*t
+			r, g, bl := 0.11-0.07*t, 0.10-0.065*t, 0.12-0.075*t
 			if x >= ox && x < ox+dw && y >= oy && y < oy+dh {
 				// Area-average the source pixels under this one.
 				sx0, sy0 := float64(minX)+(x-0.5-ox)/scale, float64(minY)+(y-0.5-oy)/scale
@@ -107,7 +109,8 @@ func logoIcon(path string) *image.NRGBA {
 					for sx := int(sx0); sx < int(sx0+1/scale)+1 && sx < maxX; sx++ {
 						c := color.NRGBAModel.Convert(src.At(sx, sy)).(color.NRGBA)
 						a := float64(c.A) / 255
-						cr, cg, cb, ca, n = cr+float64(c.R)/255*a, cg+float64(c.G)/255*a, cb+float64(c.B)/255*a, ca+a, n+1
+						pr, pg, pb := lightOnBlack(float64(c.R)/255, float64(c.G)/255, float64(c.B)/255)
+						cr, cg, cb, ca, n = cr+pr*a, cg+pg*a, cb+pb*a, ca+a, n+1
 					}
 				}
 				if n > 0 && ca > 0 {
@@ -123,6 +126,17 @@ func logoIcon(path string) *image.NRGBA {
 		}
 	}
 	return img
+}
+
+// lightOnBlack turns neutral ink (black, greys) into its inverse so it
+// reads on black; coloured ink, such as the crimson dragon, is kept.
+func lightOnBlack(r, g, b float64) (float64, float64, float64) {
+	hi, lo := math.Max(r, math.Max(g, b)), math.Min(r, math.Min(g, b))
+	if hi-lo > 0.18 { // saturated: a colour of the logo
+		return r, g, b
+	}
+	v := 1 - (r+g+b)/3
+	return v, v, v
 }
 
 // gaugeIcon is the rose squircle with a white gauge.
