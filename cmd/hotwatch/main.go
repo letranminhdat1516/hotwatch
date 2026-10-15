@@ -48,6 +48,7 @@ func main() {
 		win = mygo.NewWindow(mygo.WindowOptions{Title: "Hotwatch", Width: 1280, Height: 800, MinWidth: 900, MinHeight: 560,
 			TitleBarStyle: mygo.TitleBarHiddenInset, TrafficLightPosition: &mygo.Point{X: 14, Y: 14},
 			Content: ui.View(app.View)})
+		startNook(c, app, win, cfg.Settings.NookOff)
 		c.startHub()
 	})
 	err = mygo.App.Run()

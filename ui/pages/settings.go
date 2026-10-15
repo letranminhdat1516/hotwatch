@@ -13,6 +13,7 @@ var (
 	intervalLabels = []string{"0.5 s", "1 s", "2 s", "5 s"}
 	intervalMs     = []int{500, 1000, 2000, 5000}
 	unitLabels     = []string{"Bytes/s", "Bits/s"}
+	nookLabels     = []string{"Show", "Hide"}
 )
 
 // nearestInterval is the index of the option closest to ms.
@@ -38,17 +39,23 @@ func abs(n int) int {
 // it was built with, applied before the next frame, so a per-frame local
 // would never see it.
 type SettingsState struct {
-	interval, units int
-	syncedMs        int
-	syncedUnits     string
-	init            bool
+	interval, units, nook int
+	syncedMs              int
+	syncedUnits           string
+	syncedNookOff         bool
+	init                  bool
 }
 
 // sync points the controls at s when the settings changed elsewhere.
 func (st *SettingsState) sync(s store.Settings) {
-	if st.init && st.syncedMs == s.IntervalMs && st.syncedUnits == s.NetUnits {
+	if st.init && st.syncedMs == s.IntervalMs && st.syncedUnits == s.NetUnits && st.syncedNookOff == s.NookOff {
 		return
 	}
+	st.nook = 0
+	if s.NookOff {
+		st.nook = 1
+	}
+	st.syncedNookOff = s.NookOff
 	st.interval = nearestInterval(s.IntervalMs)
 	st.units = 0
 	if s.NetUnits == "bits" {
@@ -58,7 +65,7 @@ func (st *SettingsState) sync(s store.Settings) {
 }
 
 // Settings builds the Settings page (UI-DESIGN.md, "Settings"): the poll
-// interval, network units, the keyboard shortcuts and the build. set is
+// interval, network units, the nook, the keyboard shortcuts and the build. set is
 // called with the changed settings when the user picks an option; the
 // caller persists and applies them. Options without an implementation
 // behind them (language, menu bar) are not offered.
@@ -88,6 +95,16 @@ func Settings(c *ui.Context, st *SettingsState, s store.Settings, set func(store
 				set(s)
 				c.Invalidate() // redraw now: the sidebar already drew this frame
 			}
+		})
+		section(c, "Nook", func() {
+			ui.Text(c, "Notch bar and island").FontSize(12).TextColor(t.TextMuted)
+			ui.Row(c).Children(func() { ui.Segmented(c, &st.nook, nookLabels...) })
+			if off := st.nook == 1; off != s.NookOff {
+				s.NookOff, st.syncedNookOff = off, off
+				set(s)
+				c.Invalidate()
+			}
+			note(c, "A thin CPU and memory bar under the notch; point at the notch for the island. Hidden on Macs without a notch.")
 		})
 		section(c, "Keyboard", func() {
 			for _, line := range []string{

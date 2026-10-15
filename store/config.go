@@ -47,6 +47,7 @@ type Settings struct {
 	NetUnits      string              `json:"netUnits,omitempty"` // "bits" for bits per second; empty: bytes
 	Columns       map[string][]string `json:"columns,omitempty"`
 	LaunchAtLogin bool                `json:"launchAtLogin"`
+	NookOff       bool                `json:"nookOff,omitempty"` // hide the notch bar and island
 }
 
 type UIState struct {

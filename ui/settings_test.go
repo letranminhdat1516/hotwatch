@@ -55,3 +55,22 @@ func TestSettingsPageChangesIntervalAndUnits(t *testing.T) {
 		t.Fatalf("rates not back in bytes: %q", tt.Texts())
 	}
 }
+
+func TestSettingsTurnsTheNookOff(t *testing.T) {
+	app := testApp(hub.HostView{Snap: &model.Snapshot{}})
+	var got []store.Settings
+	app.SetSettings(store.Settings{IntervalMs: 2000})
+	app.SetSettingsHook(func(s store.Settings) { got = append(got, s) })
+	tt := ui.NewTester(app.View, 1200, 900)
+	tt.Key(ui.Cmd, ui.KeyComma)
+	if !slices.Contains(tt.Texts(), "Nook") {
+		t.Fatalf("no Nook section: %q", tt.Texts())
+	}
+	if err := tt.Click("Hide"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(got) != 1 || !got[0].NookOff || got[0].IntervalMs != 2000 {
+		t.Fatalf("hook calls %+v, want one with NookOff", got)
+	}
+}

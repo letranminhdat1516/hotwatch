@@ -479,6 +479,7 @@ type core struct {
 	runner  *hub.ActionRunner
 	apps    *apps.Darwin // the Apps page's scanner and the uninstall executor's
 	pkgs    *pkgs.System // the Packages page's manager and the package executor's
+	nook    *nookCtl     // nil until startNook (and in tests)
 	hub     hubAPI
 	app     appUI
 	done    chan struct{}
@@ -524,6 +525,9 @@ func (c *core) setSettings(s store.Settings) {
 	}
 	if c.hub != nil {
 		c.hub.SetInterval(c.interval())
+	}
+	if c.nook != nil {
+		c.nook.setOff(s.NookOff)
 	}
 }
 
@@ -656,6 +660,13 @@ func (c *core) publish(id string, v hub.HostView) {
 	c.post(func() {
 		c.app.Apply(id, v)
 		c.times.applied(id, v)
+		if c.nook != nil {
+			c.nook.observe(id, v.Conn.State, time.Now())
+			c.nook.bar.redraw()
+			if c.nook.shown {
+				c.nook.island.redraw()
+			}
+		}
 	})
 }
 

@@ -149,3 +149,23 @@ func (a *App) passphraseDialog(c *ui.Context) {
 		answer("", false) // dismissed with Escape or a click outside
 	}
 }
+
+// Selected is the host the pages show.
+func (a *App) Selected() string { return a.selected }
+
+// Hosts are the configured hosts, in order.
+func (a *App) Hosts() []store.Host { return slices.Clone(a.hosts) }
+
+// HostView is the latest view of host id.
+func (a *App) HostView(id string) hub.HostView { return a.views[id] }
+
+// ShowPage opens page on the selected host, as a sidebar click does; a
+// page the host does not have is ignored.
+func (a *App) ShowPage(page string) {
+	if slices.ContainsFunc(visiblePages(a.views[a.selected].Info.Caps), func(p Page) bool { return p.Key == page }) {
+		a.setPage(page)
+	}
+}
+
+// TogglePause holds updates back, or resumes them.
+func (a *App) TogglePause() { a.togglePause() }
