@@ -1,0 +1,12 @@
+package ui
+
+import "time"
+
+// SetClock replaces the App's clock for tests.
+func SetClock(a *App, now func() time.Time) { a.now = now }
+
+// AgesTick exposes ageTick for tests.
+var AgesTick = ageTick
+
+// PageSubtitle exposes pageSubtitle for tests.
+var PageSubtitle = pageSubtitle

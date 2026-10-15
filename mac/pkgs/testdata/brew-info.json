@@ -1,0 +1,114 @@
+{
+  "formulae": [
+    {
+      "name": "go",
+      "full_name": "go",
+      "tap": "homebrew/core",
+      "outdated": true,
+      "installed": [
+        {
+          "version": "1.27.0",
+          "installed_on_request": true
+        }
+      ],
+      "versions": {
+        "stable": "1.27.1",
+        "head": "HEAD",
+        "bottle": true
+      }
+    },
+    {
+      "name": "node",
+      "full_name": "node",
+      "tap": "homebrew/core",
+      "outdated": true,
+      "installed": [
+        {
+          "version": "24.9.0",
+          "installed_on_request": true
+        }
+      ],
+      "versions": {
+        "stable": "24.10.0",
+        "head": "HEAD",
+        "bottle": true
+      }
+    },
+    {
+      "name": "ripgrep",
+      "full_name": "ripgrep",
+      "tap": "homebrew/core",
+      "outdated": false,
+      "installed": [
+        {
+          "version": "15.1.0",
+          "installed_on_request": true
+        }
+      ],
+      "versions": {
+        "stable": "15.1.0",
+        "head": "HEAD",
+        "bottle": true
+      }
+    },
+    {
+      "name": "abseil",
+      "full_name": "abseil",
+      "tap": "homebrew/core",
+      "outdated": false,
+      "installed": [],
+      "versions": {
+        "stable": "20260817.0",
+        "head": "HEAD",
+        "bottle": true
+      }
+    }
+  ],
+  "casks": [
+    {
+      "token": "visual-studio-code",
+      "name": [
+        "Microsoft Visual Studio Code",
+        "VS Code"
+      ],
+      "version": "1.53.0",
+      "installed": "1.49.2",
+      "outdated": true,
+      "tap": "homebrew/cask",
+      "homepage": "https://code.visualstudio.com/",
+      "desc": "Open-source code editor",
+      "installed_time": 1772276104,
+      "auto_updates": true,
+      "artifacts": [
+        {
+          "uninstall": [
+            {
+              "quit": "com.microsoft.VSCode"
+            }
+          ]
+        },
+        {
+          "app": [
+            "Visual Studio Code.app"
+          ]
+        },
+        {
+          "binary": [
+            "code"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "iterm2",
+      "name": [
+        "iTerm2"
+      ],
+      "version": "3.5.14",
+      "installed": "3.5.14",
+      "outdated": false,
+      "tap": "homebrew/cask",
+      "homepage": "https://iterm2.com/"
+    }
+  ]
+}

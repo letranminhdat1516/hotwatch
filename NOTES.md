@@ -9,3 +9,12 @@
 
 ## Questions / assumptions
 See REQUIREMENTS.md "Open questions / assumptions" (Q1–Q7).
+
+## Decisions
+
+- T0.9 collector spike (Mac, M5, non-root uid 501, CGO_ENABLED=0, gopsutil v4.26.9, 667 processes by `ps -A | wc -l`):
+- Build and TestBasicsNoCgo (cpu.Percent, mem.VirtualMemory): OK, yes.
+- Basic scan (Name, CPUPercent, MemoryInfo per process): 18.5 ms/scan (18,504,467 ns/op, 5x).
+- Full scan (+ CreateTime, Username, Cmdline, NumThreads): 37.9 ms/scan (37,885,508 ns/op, 5x).
+- Non-root errors per scan (about, 1025/5): Cmdline error ~205 and Name error ~66 (other users' processes); MemoryInfo returns no error but RSS==0 for ~205; CPUPercent, CreateTime, Username, NumThreads: 0 errors.
+- Decision: both scans are <= 50 ms, so B1/B2 use gopsutil for system CPU/mem and the process scan; error-prone fields (Cmdline, Name, RSS) must tolerate failures and show unknown ("—"), not 0. Own libproc via purego is not needed for now; revisit only if the scan exceeds budget on 3,000+ process hosts (not measured here; Linux not tested).
