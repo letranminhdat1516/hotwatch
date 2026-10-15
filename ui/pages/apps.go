@@ -19,11 +19,11 @@ import (
 
 var appCols = []ui.TableColumn{
 	{Title: "Name", ID: "name", MinWidth: 160, Sortable: true},
-	{Title: "Version", ID: "version", Width: 110, MinWidth: 70, Sortable: true},
+	{Title: "Version", ID: "version", Width: 220, MinWidth: 90, Sortable: true},
 	{Title: "Size", ID: "size", Width: 90, MinWidth: 60, Align: ui.End, Sortable: true},
-	{Title: "Kind", ID: "kind", Width: 110, MinWidth: 80, Sortable: true},
-	{Title: "Last opened", ID: "opened", Width: 120, MinWidth: 90, Sortable: true},
-	{Title: "Source", ID: "source", Width: 100, MinWidth: 70, Sortable: true},
+	{Title: "Kind", ID: "kind", Width: 140, MinWidth: 80, Sortable: true},
+	{Title: "Last opened", ID: "opened", Width: 140, MinWidth: 90, Sortable: true},
+	{Title: "Source", ID: "source", Width: 120, MinWidth: 70, Sortable: true},
 }
 
 // AppsInput is what the Apps page reads each frame.
@@ -34,7 +34,13 @@ type AppsInput struct {
 	Width   float32
 	// Procs are the host's processes: an app with one is running.
 	Procs []model.Process
+	// Packages is the Packages view: the Homebrew and mise tabs, and which
+	// cask installed an app and whether it has an update. nil: none.
+	Packages *Packages
 }
+
+// appTabs are the Apps page's views.
+var appTabs = []string{"Apps", "Homebrew", "mise"}
 
 // Apps is the Apps page: the applications installed on this Mac, with an
 // inspector and an uninstall that moves the bundle to the Trash. The scan
@@ -69,6 +75,8 @@ type Apps struct {
 	pending         apps.App
 	handled         hub.ActionID    // the last uninstall whose result reloaded the list
 	running         map[string]bool // bundles with a running process, this frame
+	tab             int             // index into appTabs
+	pk              *Packages       // this frame's Packages view
 }
 
 // NewApps returns the page over scanner; post runs a function on the main
@@ -178,6 +186,8 @@ func (p *Apps) Render(c *ui.Context, in AppsInput) {
 		p.load()
 	}
 	p.reloadAfterUninstall(in)
+	p.pk = in.Packages
+	p.pk.ensureLoaded()
 	p.ensure()
 	p.running = map[string]bool{}
 	for _, pr := range in.Procs {
@@ -188,14 +198,24 @@ func (p *Apps) Render(c *ui.Context, in AppsInput) {
 	t := c.Theme()
 	ui.Column(c).Gap(2 * g()).Children(func() {
 		ui.Row(c).Gap(2 * g()).AlignItems(ui.Center).Children(func() {
-			ui.SearchField(c, &p.query).Label("Search apps").Bind(&p.search).Width(36 * g())
-			ui.Spacer(c)
 			if p.loading {
 				ui.Text(c, "Scanning…").FontSize(13).TextColor(t.TextMuted)
 			} else {
 				ui.Text(c, p.summary()).FontSize(13).TextColor(t.TextMuted).SingleLine()
 			}
+			ui.Spacer(c)
+			if p.tab == 0 {
+				ui.SearchField(c, &p.query).Label("Search apps").Bind(&p.search).Width(36 * g())
+			}
+			if in.Packages != nil && in.Packages.mgr != nil {
+				ui.Segmented(c, &p.tab, appTabs...)
+			}
 		})
+		if p.tab > 0 && in.Packages != nil {
+			in.Packages.embedded, in.Packages.tab = true, p.tab-1
+			in.Packages.Render(c, PackagesInput{HostID: in.HostID, Now: in.Now, Actions: in.Actions, Width: in.Width})
+			return
+		}
 		if p.err != nil {
 			components.Banner(c, components.BannerWarning, "Could not list applications: "+p.err.Error())
 		}
@@ -214,6 +234,7 @@ func (p *Apps) Render(c *ui.Context, in AppsInput) {
 		} else {
 			p.table(c).Height(h)
 		}
+		p.footer(c, in)
 	})
 	p.dialog(c, in)
 }
@@ -279,6 +300,14 @@ func (p *Apps) cell(c *ui.Context, a *apps.App, id string) {
 			}
 		})
 	case "version":
+		if x, ok := p.pk.caskFor(a.Bundle); ok && x.Outdated && x.Newest != "" {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, orDash(a.Version)).FontSize(13).SingleLine()
+				ui.Text(c, "→").FontSize(12).TextColor(t.TextMuted).SingleLine()
+				ui.Text(c, x.Newest).FontSize(13).FontWeight(650).TextColor(ui.Hex("#0a84ff")).SingleLine()
+			})
+			return
+		}
 		text(orDash(a.Version), false)
 	case "size":
 		if n, ok := p.sizes[a.Bundle]; ok {
@@ -292,7 +321,11 @@ func (p *Apps) cell(c *ui.Context, a *apps.App, id string) {
 	case "opened":
 		text(openedText(a.LastOpened), false)
 	case "source":
-		text(orDash(a.Source), false)
+		src := a.Source
+		if _, ok := p.pk.caskFor(a.Bundle); ok && src == "" {
+			src = "Homebrew"
+		}
+		text(orDash(src), false)
 	}
 }
 
@@ -339,7 +372,55 @@ func (p *Apps) summary() string {
 	if n > 0 {
 		s += fmt.Sprintf(" · %d running", n)
 	}
+	if u := p.updates(); u > 0 {
+		s += " · " + plural(u, "update")
+	}
 	return s
+}
+
+// updates counts the listed apps whose cask has a newer version.
+func (p *Apps) updates() int {
+	n := 0
+	for _, a := range p.apps {
+		if x, ok := p.pk.caskFor(a.Bundle); ok && x.Outdated {
+			n++
+		}
+	}
+	return n
+}
+
+// footer says when Homebrew was last asked and offers to update every app
+// it installed.
+func (p *Apps) footer(c *ui.Context, in AppsInput) {
+	if p.pk == nil || p.pk.mgr == nil {
+		return
+	}
+	t := c.Theme()
+	ui.Row(c).Gap(2 * g()).AlignItems(ui.Center).Children(func() {
+		ui.Spacer(c)
+		switch {
+		case p.pk.loading:
+			ui.Text(c, "Checking for updates…").FontSize(13).TextColor(t.TextMuted).SingleLine()
+		case !p.pk.checked.IsZero():
+			ui.Text(c, "Checked "+format.Ago(in.Now.Sub(p.pk.checked))).FontSize(13).TextColor(t.TextMuted).SingleLine()
+		}
+		u := p.updates()
+		if u == 0 {
+			return
+		}
+		ui.Text(c, plural(u, "update")).FontSize(13).TextColor(t.TextMuted).SingleLine()
+		last, started := in.Actions.Last(in.HostID, "package")
+		busy := started && (last.State == "running" || last.State == "confirming")
+		all := ui.Row(c).Key("apps-update-all").Cursor(ui.CursorPointer).Label("Update All")
+		if all.Clicked() && !busy {
+			in.Actions.Start(hub.Action{Kind: "package", HostID: in.HostID, State: "confirming", Verb: "upgrade-all", Target: "cask:"})
+		}
+		col := ui.Hex("#0a84ff")
+		if busy {
+			col = t.TextMuted
+		}
+		all.Children(func() { ui.Text(c, "Update All").FontSize(13).FontWeight(650).TextColor(col).SingleLine() })
+	})
 }
 
 // inspector shows the chosen application: its icon and name, the actions
@@ -365,6 +446,17 @@ func (p *Apps) inspector(c *ui.Context, in AppsInput, a apps.App) {
 			}
 			closeBtn.Children(func() { components.Glyph(c, icons.Close, 14, t.TextMuted) })
 		})
+		cask, isCask := p.pk.caskFor(a.Bundle)
+		if isCask && cask.Desc != "" {
+			ui.Text(c, cask.Desc).FontSize(14)
+		}
+		if isCask && cask.Outdated && cask.Newest != "" {
+			last, started := in.Actions.Last(in.HostID, "package")
+			busy := started && (last.State == "running" || last.State == "confirming")
+			if ui.PrimaryButton(c, "Update to "+cask.Newest).Disabled(busy).Clicked() {
+				in.Actions.Start(hub.Action{Kind: "package", HostID: in.HostID, State: "confirming", Verb: "upgrade", Target: "cask:" + cask.Name})
+			}
+		}
 		ui.Row(c).Gap(g()).Children(func() {
 			if p.Open != nil && ui.Button(c, "Open").Grow(1).Clicked() {
 				p.Open(a.Bundle)
@@ -388,6 +480,9 @@ func (p *Apps) inspector(c *ui.Context, in AppsInput, a apps.App) {
 		ui.Text(c, "DETAILS").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g(), 0, 0, 0)
 		ui.Column(c).Gap(g()).Children(func() {
 			kvRow(c, "Version", orDash(a.Version))
+			if isCask && cask.Newest != "" {
+				kvRow(c, "Newest", cask.Newest)
+			}
 			if n, ok := p.sizes[a.Bundle]; ok {
 				kvRow(c, "Size", format.Bytes(n))
 			} else {
@@ -400,6 +495,36 @@ func (p *Apps) inspector(c *ui.Context, in AppsInput, a apps.App) {
 			}
 			kvRow(c, "Last opened", opened)
 			kvRow(c, "Source", orDash(a.Source))
+			switch {
+			case isCask && cask.AutoUpdates:
+				kvRow(c, "Updates", "The app itself")
+			case isCask:
+				kvRow(c, "Updates", "Homebrew")
+			case a.Source == "App Store":
+				kvRow(c, "Updates", "App Store")
+			default:
+				kvRow(c, "Updates", "Unknown")
+			}
+			if isCask {
+				kvRow(c, "Cask", cask.Name)
+				if !cask.Installed.IsZero() {
+					kvRow(c, "Installed", cask.Installed.Local().Format("Jan 2, 2006"))
+				}
+				if cask.Tap != "" {
+					kvRow(c, "Tap", cask.Tap)
+				}
+				if home := cask.Homepage; home != "" && p.Open != nil && (strings.HasPrefix(home, "https://") || strings.HasPrefix(home, "http://")) {
+					ui.Row(c).Gap(2 * g()).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "Homepage").FontSize(14).TextColor(t.TextMuted).SingleLine().Shrink(0)
+						ui.Spacer(c)
+						link := ui.Text(c, strings.TrimPrefix(strings.TrimPrefix(home, "https://"), "http://")).FontSize(14).FontWeight(600).
+							TextColor(ui.Hex("#0a84ff")).SingleLine().Shrink(1).Cursor(ui.CursorPointer).Key("app-home")
+						if link.Clicked() {
+							p.Open(home)
+						}
+					})
+				}
+			}
 			state := "Not running"
 			if p.running[a.Bundle] {
 				state = "Running"

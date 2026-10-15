@@ -300,10 +300,11 @@ func (a *App) View(c *ui.Context) {
 		case "about":
 			pages.About(c, v, a.now())
 		case "packages":
+			a.pkgs.Standalone()
 			a.pkgs.Render(c, pages.PackagesInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid})
 		case "apps":
 			a.apps.Render(c, pages.AppsInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid,
-				Procs: v.Procs})
+				Procs: v.Procs, Packages: a.pkgs})
 		case "settings":
 			pages.Settings(c, &a.settingsUI, a.settings, a.changeSettings)
 		default:

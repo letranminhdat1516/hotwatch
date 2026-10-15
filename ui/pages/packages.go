@@ -58,6 +58,11 @@ type Packages struct {
 	ask             bool
 	pending         pkgs.Package
 	handled         hub.ActionID
+	checked         time.Time // when the last listing landed
+
+	// embedded: the Apps page shows this view under its own tabs, which
+	// pick the manager; the page's own switcher is hidden.
+	embedded bool
 }
 
 // NewPackages returns the page over mgr; post runs a function on the main
@@ -78,8 +83,33 @@ func (p *Packages) load() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		list, err := mgr.List(ctx)
-		p.post(func() { p.all, p.err, p.loaded, p.loading = list, err, true, false })
+		p.post(func() { p.all, p.err, p.loaded, p.loading, p.checked = list, err, true, false, time.Now() })
 	})
+}
+
+// ensureLoaded lists the packages once, for the Apps page's update
+// details; nothing when the host has neither tool.
+func (p *Packages) ensureLoaded() {
+	if p == nil || p.mgr == nil || p.loaded || p.loading {
+		return
+	}
+	if brew, mise := p.mgr.Available(); brew || mise {
+		p.load()
+	}
+}
+
+// caskFor is the Homebrew cask that installed the app bundle at path.
+func (p *Packages) caskFor(bundlePath string) (pkgs.Package, bool) {
+	if p == nil {
+		return pkgs.Package{}, false
+	}
+	base := bundlePath[strings.LastIndexByte(bundlePath, '/')+1:]
+	for _, x := range p.all {
+		if x.Kind == "cask" && slices.Contains(x.Apps, base) {
+			return x, true
+		}
+	}
+	return pkgs.Package{}, false
 }
 
 // mise reports whether the mise tab is shown (else Homebrew's).
@@ -135,7 +165,9 @@ func (p *Packages) Render(c *ui.Context, in PackagesInput) {
 	running := started && (last.State == "running" || last.State == "confirming")
 	ui.Column(c).Gap(2 * g()).Children(func() {
 		ui.Row(c).Gap(2 * g()).AlignItems(ui.Center).Children(func() {
-			ui.Segmented(c, &p.tab, pkgTabs...)
+			if !p.embedded {
+				ui.Segmented(c, &p.tab, pkgTabs...)
+			}
 			if outdated > 0 {
 				ui.Row(c).Padding(2, 10).Radius(999).Background(t.Accent.Alpha(0.12)).Children(func() {
 					ui.Text(c, fmt.Sprintf("%d outdated", outdated)).FontSize(12).FontWeight(600).TextColor(t.Accent).SingleLine()
@@ -294,5 +326,13 @@ func (p *Packages) reloadAfterTask(in PackagesInput) {
 	p.handled = a.ID
 	if !p.loading {
 		p.load()
+	}
+}
+
+// Standalone shows the page's own Homebrew/mise switcher again after the
+// Apps page embedded it.
+func (p *Packages) Standalone() {
+	if p != nil {
+		p.embedded = false
 	}
 }

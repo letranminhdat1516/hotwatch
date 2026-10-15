@@ -85,6 +85,7 @@ func TestManagerCommandsAreArgvAndKindAware(t *testing.T) {
 		{"upgrade", "cask:visual-studio-code", "brew upgrade --cask visual-studio-code"},
 		{"remove", "cask:iterm2", "brew uninstall --cask iterm2"},
 		{"upgrade-all", "", "brew upgrade"},
+		{"upgrade-all", "cask:", "brew upgrade --cask"},
 		{"prune", "", "brew cleanup --prune=all"},
 		{"upgrade", "mise:node", "mise upgrade node"},
 		{"prune", "mise:", "mise prune --yes"},

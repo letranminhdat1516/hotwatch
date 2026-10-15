@@ -67,6 +67,6 @@ func AppIconSized(c *ui.Context, name string, bm *ui.Bitmap, size float32) ui.El
 	}
 	return ui.Row(c).Size(size, size).Radius(radius).Shrink(0).Center().
 		Background(nameTint(name)).Children(func() {
-		ui.Text(c, Initials(name)).FontSize(size*0.4).FontWeight(700).TextColor(ui.RGB(255, 255, 255)).SingleLine()
+		ui.Text(c, Initials(name)).FontSize(size * 0.4).FontWeight(700).TextColor(ui.RGB(255, 255, 255)).SingleLine()
 	})
 }

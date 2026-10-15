@@ -148,6 +148,8 @@ func (s *System) Run(ctx context.Context, verb, target string) (<-chan string, f
 		args = cask("upgrade", name)
 	case verb == "remove" && name != "" && tool == "brew":
 		args = cask("uninstall", name)
+	case verb == "upgrade-all" && tool == "brew" && kind == "cask":
+		args = []string{"upgrade", "--cask"} // the apps Homebrew installed
 	case verb == "upgrade-all" && tool == "brew":
 		args = []string{"upgrade"}
 	case verb == "prune" && tool == "brew":

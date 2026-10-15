@@ -10,6 +10,7 @@ import (
 
 	"hotwatch/hub"
 	"hotwatch/mac/apps"
+	"hotwatch/mac/pkgs"
 	"hotwatch/model"
 	hwui "hotwatch/ui"
 	"hotwatch/ui/pages"
@@ -136,5 +137,45 @@ func TestAppsMarkRunningApps(t *testing.T) {
 	}
 	if !slices.Contains(tt.Texts(), "3 apps · 1 running") {
 		t.Fatalf("summary: %q", tt.Texts())
+	}
+}
+
+func TestAppsShowHomebrewUpdates(t *testing.T) {
+	scan := &apps.Fake{List: sampleApps(), Sizes: map[string]uint64{}}
+	page := pages.NewApps(scan, func(f func()) { f() })
+	page.Spawn = func(f func()) { f() }
+	page.Open = func(string) {}
+	mgr := &pkgs.Fake{Brew: true, Pkgs: []pkgs.Package{{Name: "visual-studio-code", Kind: "cask", Version: "1.49.2", Newest: "1.53.0",
+		Outdated: true, Desc: "Open-source code editor", Tap: "homebrew/cask", Homepage: "https://code.visualstudio.com/",
+		AutoUpdates: true, Apps: []string{"Visual Studio Code.app"}}}}
+	pk := pages.NewPackages(mgr, func(f func()) { f() })
+	pk.Spawn = func(f func()) { f() }
+	run := &hub.FakeRunner{}
+	acts := pages.NewActions(run)
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(hwui.Theme(false))
+		page.Render(c, pages.AppsInput{HostID: "local", Now: time.Now(), Actions: acts, Width: 1200, Packages: pk})
+	}, 1300, 900)
+	tt.Frame()
+	tt.Frame()
+	has := func(want ...string) {
+		t.Helper()
+		for _, w := range want {
+			if !slices.Contains(tt.Texts(), w) {
+				t.Errorf("missing %q in %q", w, tt.Texts())
+			}
+		}
+	}
+	has("→", "1.53.0", "3 apps · 1 update", "Update All", "Apps", "Homebrew", "mise")
+	if err := tt.Click("Visual Studio Code"); err != nil {
+		t.Fatal(err)
+	}
+	has("Open-source code editor", "Update to 1.53.0", "Newest", "Updates", "The app itself", "Cask", "visual-studio-code",
+		"Tap", "homebrew/cask", "Homepage", "code.visualstudio.com/")
+	if err := tt.Click("Update to 1.53.0"); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Started) != 1 || run.Started[0].Verb != "upgrade" || run.Started[0].Target != "cask:visual-studio-code" {
+		t.Fatalf("started %+v", run.Started)
 	}
 }
