@@ -3,6 +3,7 @@ package pages
 import (
 	"cmp"
 	"fmt"
+	"os/user"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,13 +25,14 @@ type procCol struct {
 	align     ui.Align
 }
 
+// procCols in their default order: the load figures first, identity after.
 var procCols = []procCol{
 	{id: "name", title: "Name", min: 100},
-	{id: "pid", title: "PID", width: 64, min: 44, align: ui.End},
-	{id: "user", title: "User", width: 90, min: 50},
 	{id: "cpu", title: "CPU", width: 72, min: 50, align: ui.End},
 	{id: "mem", title: "Memory", width: 84, min: 60, align: ui.End},
 	{id: "threads", title: "Threads", width: 80, min: 72, align: ui.End},
+	{id: "pid", title: "PID", width: 64, min: 44, align: ui.End},
+	{id: "user", title: "User", width: 90, min: 50},
 	{id: "ports", title: "Ports", width: 110, min: 60},
 	{id: "started", title: "Started", width: 104, min: 80},
 }
@@ -93,6 +95,7 @@ type Processes struct {
 	sort   ui.SortOrder
 
 	query     string
+	scope     int // which processes to list: an index into scopeLabels
 	treeMode  bool
 	collapsed map[procKey]bool // tree items the user closed; the rest are open
 
@@ -167,10 +170,11 @@ type procCacheKey struct {
 	sort  ui.SortOrder
 	query string
 	tree  bool
+	scope int
 }
 
 func (p *Processes) ensure(in ProcessesInput) {
-	key := procCacheKey{in.HostID, in.Gen, len(in.View.Procs), p.sort, p.query, p.treeMode}
+	key := procCacheKey{in.HostID, in.Gen, len(in.View.Procs), p.sort, p.query, p.treeMode, p.scope}
 	if p.cache.valid && p.cache.key == key {
 		return
 	}
@@ -183,7 +187,7 @@ func (p *Processes) ensure(in ProcessesInput) {
 	f := parseFilter(p.query)
 	keep := make([]bool, len(ps))
 	for i := range ps {
-		if keep[i] = f.match(&ps[i]); keep[i] {
+		if keep[i] = f.match(&ps[i]) && inScope(&ps[i], p.scope); keep[i] {
 			ch.shown++
 		}
 	}
@@ -349,7 +353,6 @@ func (p *Processes) FocusSearch() { p.search.Focus() }
 // Render builds the page.
 func (p *Processes) Render(c *ui.Context, in ProcessesInput) {
 	p.sync(in)
-	t := c.Theme()
 	ps := in.View.Procs
 	ui.Column(c).Gap(2 * g()).Children(func() {
 		if err := in.View.ProcsErr; err != nil {
@@ -357,20 +360,17 @@ func (p *Processes) Render(c *ui.Context, in ProcessesInput) {
 		}
 		ui.Row(c).Gap(2 * g()).AlignItems(ui.Center).Children(func() {
 			ui.SearchField(c, &p.query).Label("Search").Bind(&p.search).Grow(1)
+			ui.Segmented(c, &p.scope, scopeLabels...)
 			ui.Checkbox(c, &p.treeMode, "Tree view")
-			p.ensure(in)
-			count := fmt.Sprintf("%d processes", p.cache.shown)
-			if p.cache.shown != len(ps) {
-				count = fmt.Sprintf("%d of %d processes", p.cache.shown, len(ps))
-			}
-			ui.Text(c, count).FontSize(12).TextColor(t.TextMuted).NoWrap()
 		})
+		p.ensure(in)
 		p.actionLine(c, in)
 		if len(ps) == 0 {
 			components.EmptyState(c, "Waiting for the process list…")
 			return
 		}
 		p.content(c, in)
+		p.footer(c, in)
 	})
 	p.dialogs(c, in)
 }
@@ -481,9 +481,15 @@ func (p *Processes) table(c *ui.Context, in ProcessesInput) ui.Element {
 		layout = &st.List.Columns
 		el = ui.OutlineTable(c, st, cols, p.cache.roots, func(k procKey) []procKey { return p.cache.kids[k] },
 			func(k procKey, col int) {
-				if i, ok := p.cache.index[k]; ok && i < len(ps) {
-					cell(&ps[i], col)
+				i, ok := p.cache.index[k]
+				if !ok || i >= len(ps) {
+					return
 				}
+				if n := len(p.cache.kids[k]); n > 0 && p.cols[col] == "name" {
+					nameWithCount(c, ps[i].Name, n)
+					return
+				}
+				cell(&ps[i], col)
 			})
 		chosen = func(row int) (procKey, bool) { return st.Item(row), row < st.Rows() }
 	} else {
@@ -625,5 +631,71 @@ func procCell(c *ui.Context, pr *model.Process, id string, now time.Time) {
 			}
 		}
 	}
-	ui.Text(c, s).FontSize(13).SingleLine()
+	// Heavy consumers stand out: half a core or more, or 2 GB and up.
+	col := c.Theme().Text
+	if (id == "cpu" && pr.CPUPct >= 50) || (id == "mem" && pr.RSS >= 2<<30) {
+		col = c.Theme().Warning
+	}
+	ui.Text(c, s).FontSize(13).TextColor(col).SingleLine()
+}
+
+// scopeLabels are the process scopes the toolbar offers, in order.
+var scopeLabels = []string{"All", "Apps", "Mine", "System"}
+
+// currentUser is the account running hotwatch, for the Mine scope; on a
+// remote host it matches only an account of the same name.
+var currentUser = func() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+}()
+
+// SetCurrentUser overrides the account the Mine scope matches (tests).
+func SetCurrentUser(name string) { currentUser = name }
+
+// inScope reports whether p belongs to scope: every process; application
+// bundles; the current user's; or system accounts (root, and the service
+// accounts macOS names with a leading underscore).
+func inScope(p *model.Process, scope int) bool {
+	switch scope {
+	case 1:
+		return p.AppBundle != ""
+	case 2:
+		return currentUser != "" && p.User == currentUser
+	case 3:
+		return p.User == "root" || strings.HasPrefix(p.User, "_")
+	}
+	return true
+}
+
+// footer is the line under the table: how many processes are listed, and
+// the host's CPU and memory in use.
+func (p *Processes) footer(c *ui.Context, in ProcessesInput) {
+	t := c.Theme()
+	ps := in.View.Procs
+	count := fmt.Sprintf("%d processes", len(ps))
+	if p.cache.shown != len(ps) {
+		count = fmt.Sprintf("%d of %d processes", p.cache.shown, len(ps))
+	}
+	ui.Row(c).AlignItems(ui.Center).Gap(2 * g()).Children(func() {
+		ui.Text(c, count).FontSize(12).TextColor(t.TextMuted).NoWrap().Grow(1)
+		if s := in.View.Snap; s != nil {
+			ui.Text(c, fmt.Sprintf("CPU %.0f%%", s.CPU.Total)).FontSize(12).TextColor(t.TextMuted).NoWrap()
+			if s.Memory.Total > 0 {
+				ui.Text(c, "Memory "+format.Bytes(s.Memory.Used)).FontSize(12).TextColor(t.TextMuted).NoWrap()
+			}
+		}
+	})
+}
+
+// nameWithCount is a tree group's name with the number of processes under it.
+func nameWithCount(c *ui.Context, name string, n int) {
+	t := c.Theme()
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, orDash(name)).FontSize(13).SingleLine()
+		ui.Row(c).Padding(1, 6).Radius(8).Background(t.SurfaceHover).Children(func() {
+			ui.Text(c, fmt.Sprint(n)).FontSize(11).TextColor(t.TextMuted).SingleLine()
+		})
+	})
 }

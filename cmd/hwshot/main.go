@@ -135,11 +135,13 @@ func main() {
 	}
 	lv := views["local"]
 	lv.Procs = []model.Process{
-		{PID: 1, Name: "Google Chrome", RSS: 8<<30 + 70<<20, AppBundle: "/Applications/Google Chrome.app"},
-		{PID: 2, Name: "node", RSS: 3<<30 + 450<<20},
-		{PID: 3, Name: "Docker", RSS: 1<<30 + 380<<20, AppBundle: "/Applications/Docker.app"},
-		{PID: 4, Name: "com.apple.WebKit", RSS: 980 << 20},
-		{PID: 5, Name: "Code Helper", RSS: 720 << 20},
+		{PID: 1, Name: "Google Chrome", RSS: 8<<30 + 70<<20, AppBundle: "/Applications/Google Chrome.app", User: "cicca", CPUPct: 5.1, Threads: 1055},
+		{PID: 2, Name: "node", RSS: 3<<30 + 450<<20, User: "cicca", CPUPct: 66.3, Threads: 40},
+		{PID: 3, Name: "Docker", RSS: 1<<30 + 380<<20, AppBundle: "/Applications/Docker.app", User: "cicca", CPUPct: 0.7, Threads: 269},
+		{PID: 4, Name: "com.apple.WebKit", RSS: 980 << 20, User: "cicca", CPUPct: 1.8, Threads: 24},
+		{PID: 5, Name: "Code Helper", RSS: 720 << 20, User: "cicca", CPUPct: 12.3, Threads: 37},
+		{PID: 6, Name: "WindowServer", RSS: 109 << 20, User: "_windowserver", CPUPct: 43.8, Threads: 12},
+		{PID: 7, Name: "launchd", RSS: 20 << 20, User: "root", CPUPct: 0.2, Threads: 4},
 	}
 	views["local"] = lv
 	a := hwui.NewApp(func(id string) hub.HostView { return views[id] }, hosts, nil, func(string, string) {})

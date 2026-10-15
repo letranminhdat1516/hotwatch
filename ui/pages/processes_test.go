@@ -409,13 +409,13 @@ func TestProcessesColumnsHiddenAndReorderedArePersisted(t *testing.T) {
 	if err := e.tt.RightClick("Threads"); err != nil {
 		t.Fatal(err)
 	}
-	if m := e.tt.Menu(); !slices.Equal(m, []string{"Name", "PID", "User", "CPU", "Memory", "Threads", "Ports", "Started"}) {
+	if m := e.tt.Menu(); !slices.Equal(m, []string{"Name", "CPU", "Memory", "Threads", "PID", "User", "Ports", "Started"}) {
 		t.Fatalf("menu %q", m)
 	}
 	if err := e.tt.ChooseMenuItem("Threads"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"name", "pid", "user", "cpu", "mem", "ports", "started"}
+	want := []string{"name", "cpu", "mem", "pid", "user", "ports", "started"}
 	if len(e.cols) != 1 || !slices.Equal(e.cols[0], want) {
 		t.Fatalf("hook calls %q, want [%q]", e.cols, want)
 	}
