@@ -307,3 +307,38 @@ func TestPortsRefreshIgnoresCallerContext(t *testing.T) {
 		t.Fatalf("cancelled caller ctx blanked ports: %v", got)
 	}
 }
+
+func TestProcessesReadStaticFactsOncePerProcess(t *testing.T) {
+	c := New().(*collector)
+	ctx := context.Background()
+	first, err := c.Processes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := staticReads.Load()
+	second, err := c.Processes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reread := staticReads.Load() - before
+	// Only processes started between the two scans are read in full.
+	if reread > int64(len(second)/10) {
+		t.Fatalf("second scan re-read %d of %d processes' static facts", reread, len(second))
+	}
+	byKey := map[int32]model.Process{}
+	for _, p := range first {
+		byKey[p.PID] = p
+	}
+	same := 0
+	for _, p := range second {
+		if q, ok := byKey[p.PID]; ok && q.StartTime.Equal(p.StartTime) {
+			if q.Name != p.Name || q.User != p.User || q.Command != p.Command || q.AppBundle != p.AppBundle {
+				t.Fatalf("cached facts differ for %d: %+v vs %+v", p.PID, q, p)
+			}
+			same++
+		}
+	}
+	if same < len(second)/2 {
+		t.Fatalf("only %d of %d processes matched between scans", same, len(second))
+	}
+}

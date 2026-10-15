@@ -31,6 +31,7 @@ type collector struct {
 	prevNetAt  time.Time
 
 	prevProc map[procKey]procPrev
+	statics  map[procKey]procStatic // static facts of the last scan's processes
 	ports    portCache
 	lsof     func(context.Context) ([]byte, error) // nil = runLsof
 }

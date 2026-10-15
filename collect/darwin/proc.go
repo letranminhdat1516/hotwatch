@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -62,7 +63,7 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 			if ctx.Err() != nil {
 				return
 			}
-			results[i] = readProc(ctx, gp, now)
+			results[i] = readProc(ctx, gp, now, c.statics)
 		}()
 	}
 	wg.Wait()
@@ -71,6 +72,7 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 	}
 
 	next := make(map[procKey]procPrev, len(list))
+	statics := make(map[procKey]procStatic, len(list))
 	out := make([]model.Process, 0, len(list))
 	for _, r := range results {
 		if r == nil {
@@ -89,36 +91,61 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 			}
 		}
 		next[r.key] = cur
+		statics[r.key] = r.static
 		r.p.Ports = ports[r.p.PID]
 		out = append(out, r.p)
 	}
-	c.prevProc = next
+	c.prevProc, c.statics = next, statics // exited processes drop out of both
 	return out, nil
 }
 
-func readProc(ctx context.Context, gp *gproc.Process, now time.Time) *procResult {
+// procStatic are the facts of a process that do not change while it runs:
+// read once per (PID, start time) and reused by later scans.
+type procStatic struct {
+	name, user, command, appBundle string
+}
+
+// staticReads counts full reads of static facts (tests).
+var staticReads atomic.Int64
+
+func readStatic(ctx context.Context, gp *gproc.Process) procStatic {
+	staticReads.Add(1)
+	var st procStatic
+	exe, _ := gp.ExeWithContext(ctx)
+	st.appBundle = appBundle(exe)
+	if name, err := gp.NameWithContext(ctx); err == nil && name != "" {
+		st.name = name
+	} else if exe != "" {
+		st.name = filepath.Base(exe)
+	} else {
+		st.name = "?"
+	}
+	if u, err := gp.UsernameWithContext(ctx); err == nil {
+		st.user = u
+	}
+	if cmd, err := gp.CmdlineWithContext(ctx); err == nil {
+		st.command = capCommand(cmd)
+	}
+	return st
+}
+
+// readProc reads one process. statics holds the static facts of processes
+// seen before (read-only here); a process not in it is read in full.
+func readProc(ctx context.Context, gp *gproc.Process, now time.Time, statics map[procKey]procStatic) *procResult {
 	ct, err := gp.CreateTimeWithContext(ctx)
 	if err != nil {
 		return nil // exited, or not identifiable: no (PID, StartTime) identity
 	}
-	p := model.Process{PID: gp.Pid, StartTime: time.UnixMilli(ct)}
+	key := procKey{gp.Pid, ct}
+	st, ok := statics[key]
+	if !ok {
+		st = readStatic(ctx, gp)
+	}
+	p := model.Process{PID: gp.Pid, StartTime: time.UnixMilli(ct), Name: st.name, User: st.user, Command: st.command, AppBundle: st.appBundle}
+	// The parent changes when it exits (the child moves to launchd): read it
+	// every time.
 	if ppid, err := gp.PpidWithContext(ctx); err == nil {
 		p.PPID = ppid
-	}
-	exe, _ := gp.ExeWithContext(ctx)
-	p.AppBundle = appBundle(exe)
-	if name, err := gp.NameWithContext(ctx); err == nil && name != "" {
-		p.Name = name
-	} else if exe != "" {
-		p.Name = filepath.Base(exe)
-	} else {
-		p.Name = "?"
-	}
-	if u, err := gp.UsernameWithContext(ctx); err == nil {
-		p.User = u
-	}
-	if cmd, err := gp.CmdlineWithContext(ctx); err == nil {
-		p.Command = capCommand(cmd)
 	}
 	var cur procPrev
 	cur.at = now
@@ -134,13 +161,14 @@ func readProc(ctx context.Context, gp *gproc.Process, now time.Time) *procResult
 	if r, w, ok := diskIO(gp.Pid); ok {
 		cur.read, cur.write, cur.haveIO = r, w, true
 	}
-	return &procResult{p: p, key: procKey{gp.Pid, ct}, prev: cur}
+	return &procResult{p: p, key: key, prev: cur, static: st}
 }
 
 type procResult struct {
-	p    model.Process
-	key  procKey
-	prev procPrev
+	p      model.Process
+	key    procKey
+	prev   procPrev
+	static procStatic
 }
 
 // appBundle returns the nearest enclosing *.app directory of an executable
