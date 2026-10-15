@@ -109,7 +109,14 @@ type Battery struct {
 	PowerW        *float64       `json:"powerW,omitempty"`
 	TempC         *float64       `json:"tempC,omitempty"`
 	ThermalState  string         `json:"thermalState"`
-	Assertions    []Assertion    `json:"assertions,omitempty"`
+	// HealthPct is the full-charge capacity in percent of the design
+	// capacity; Cycles the charge cycles; CapacityMAh and DesignMAh the two
+	// capacities. nil where the battery does not report them.
+	HealthPct   *float64    `json:"healthPct,omitempty"`
+	Cycles      *int        `json:"cycles,omitempty"`
+	CapacityMAh *int        `json:"capacityMAh,omitempty"`
+	DesignMAh   *int        `json:"designMAh,omitempty"`
+	Assertions  []Assertion `json:"assertions,omitempty"`
 }
 
 // Assertion is a power assertion (something keeping the machine awake).

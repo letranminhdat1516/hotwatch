@@ -29,6 +29,7 @@ type procKey struct {
 type procPrev struct {
 	cpuSecs     float64
 	read, write uint64
+	energy      uint64 // energy used, nJ
 	haveIO      bool
 	at          time.Time
 }
@@ -89,6 +90,10 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 			if cur.haveIO && prev.haveIO {
 				r.p.DiskReadBps = model.Rate(prev.read, cur.read, dt)
 				r.p.DiskWriteBps = model.Rate(prev.write, cur.write, dt)
+				if nj := model.Rate(prev.energy, cur.energy, dt); nj != nil {
+					mw := *nj / 1e6 // nJ/s → mW
+					r.p.PowerMW = &mw
+				}
 			}
 		}
 		next[r.key] = cur
@@ -166,9 +171,9 @@ func readProc(ctx context.Context, gp *gproc.Process, now time.Time, statics map
 	if t, err := gp.TimesWithContext(ctx); err == nil {
 		cur.cpuSecs = t.User + t.System
 	}
-	if fp, r, w, ok := rusage(gp.Pid); ok {
+	if fp, r, w, e, ok := rusage(gp.Pid); ok {
 		p.Footprint = fp
-		cur.read, cur.write, cur.haveIO = r, w, true
+		cur.read, cur.write, cur.energy, cur.haveIO = r, w, e, true
 	}
 	return &procResult{p: p, key: key, prev: cur, static: st}
 }
@@ -223,9 +228,11 @@ func capCommand(s string) string {
 
 const (
 	rusageInfoV4      = 4
-	rusageBufSize     = 512 // rusage_info_v4 is 296 bytes
+	rusageBufSize     = 512 // rusage_info_v6 is 464 bytes
 	offFootprint      = 72  // ri_phys_footprint in <sys/resource.h> rusage_info_v4
 	offDiskBytesRead  = 144 // ri_diskio_bytesread
+	rusageInfoV6      = 6   // adds ri_energy_nj (macOS 14+)
+	offEnergy         = 336 // ri_energy_nj in rusage_info_v6, nanojoules
 	offDiskBytesWrite = 152 // ri_diskio_byteswritten
 )
 
@@ -244,19 +251,22 @@ func loadRusage() {
 	rusageFn = fn
 }
 
-// rusage reads proc_pid_rusage(RUSAGE_INFO_V4): the physical footprint and
-// cumulative bytes read/written; ok is false when the call fails (EPERM for
-// other users' processes).
-func rusage(pid int32) (footprint, read, write uint64, ok bool) {
+// rusage reads proc_pid_rusage (v6, else v4): the physical footprint,
+// cumulative bytes read/written and energy used (0 before v6); ok is false
+// when the call fails (EPERM for other users' processes).
+func rusage(pid int32) (footprint, read, write, energy uint64, ok bool) {
 	rusageOnce.Do(loadRusage)
 	if rusageFn == nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	var buf [rusageBufSize]byte
-	if rusageFn(pid, rusageInfoV4, &buf[0]) != 0 {
-		return 0, 0, 0, false
+	if rusageFn(pid, rusageInfoV6, &buf[0]) == 0 {
+		return leU64(buf[offFootprint:]), leU64(buf[offDiskBytesRead:]), leU64(buf[offDiskBytesWrite:]), leU64(buf[offEnergy:]), true
 	}
-	return leU64(buf[offFootprint:]), leU64(buf[offDiskBytesRead:]), leU64(buf[offDiskBytesWrite:]), true
+	if rusageFn(pid, rusageInfoV4, &buf[0]) != 0 { // older macOS: no energy
+		return 0, 0, 0, 0, false
+	}
+	return leU64(buf[offFootprint:]), leU64(buf[offDiskBytesRead:]), leU64(buf[offDiskBytesWrite:]), 0, true
 }
 
 func leU64(b []byte) uint64 {

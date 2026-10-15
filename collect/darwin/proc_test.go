@@ -389,3 +389,32 @@ func TestOwnProcessHasAFootprint(t *testing.T) {
 	}
 	t.Fatal("own process not listed")
 }
+
+func TestBusyProcessHasPower(t *testing.T) {
+	c := New().(*collector)
+	ctx := context.Background()
+	if _, err := c.Processes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now().Add(700 * time.Millisecond)
+	for x := 0; time.Now().Before(end); x++ { // keep a core busy
+		_ = x * x
+	}
+	ps, err := c.Processes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range ps {
+		if p.PID == int32(os.Getpid()) {
+			if p.PowerMW == nil || *p.PowerMW <= 0 || *p.PowerMW > 50000 {
+				if p.PowerMW != nil {
+					t.Fatalf("own power %v mW", *p.PowerMW)
+				}
+				t.Fatal("own power unknown")
+			}
+			t.Logf("busy test process: %.0f mW", *p.PowerMW)
+			return
+		}
+	}
+	t.Fatal("own process not listed")
+}

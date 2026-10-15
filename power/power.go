@@ -58,7 +58,9 @@ func Read(ctx context.Context) (*model.Battery, error) {
 	if !ok {
 		return nil, nil
 	}
-	b.PowerW, b.TempC = smartBattery(smartBatteryProps())
+	props := smartBatteryProps()
+	b.PowerW, b.TempC = smartBattery(props)
+	batteryHealth(&b, props)
 	b.ThermalState = ThermalState()
 	list, err := Assertions(ctx)
 	b.Assertions = list
@@ -119,7 +121,8 @@ func fromPowerSource(d map[string]any) (model.Battery, bool) {
 	return b, true
 }
 
-var smartBatteryKeys = []string{"InstantAmperage", "Voltage", "Temperature"}
+var smartBatteryKeys = []string{"InstantAmperage", "Voltage", "Temperature",
+	"AppleRawMaxCapacity", "DesignCapacity", "CycleCount"}
 
 // smartBatteryProps reads only the few AppleSmartBattery properties needed;
 // the full property table is large (BatteryData, LifetimeData) and not read.
@@ -197,4 +200,21 @@ func thermalName(v int64) string {
 		return "critical"
 	}
 	return ""
+}
+
+// batteryHealth fills the battery's wear: health is the full-charge
+// capacity (AppleRawMaxCapacity, mAh) over the design capacity, as System
+// Settings reports "Maximum Capacity"; and the cycle count.
+func batteryHealth(b *model.Battery, p map[string]any) {
+	if n, ok := cf.Int(p, "CycleCount"); ok && n >= 0 {
+		c := int(n)
+		b.Cycles = &c
+	}
+	maxCap, ok1 := cf.Int(p, "AppleRawMaxCapacity")
+	design, ok2 := cf.Int(p, "DesignCapacity")
+	if ok1 && ok2 && maxCap > 0 && design > 0 {
+		m, d := int(maxCap), int(design)
+		h := float64(maxCap) / float64(design) * 100
+		b.CapacityMAh, b.DesignMAh, b.HealthPct = &m, &d, &h
+	}
 }

@@ -4,6 +4,7 @@ package power
 
 import (
 	"context"
+	"hotwatch/model"
 	"math"
 	"os/exec"
 	"regexp"
@@ -136,5 +137,21 @@ func BenchmarkRead(b *testing.B) {
 		if _, err := Read(ctx); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestBatteryHealthFromCapacities(t *testing.T) {
+	var b model.Battery
+	batteryHealth(&b, map[string]any{"AppleRawMaxCapacity": int64(6016), "DesignCapacity": int64(6249), "CycleCount": int64(92)})
+	if b.HealthPct == nil || *b.HealthPct < 96.2 || *b.HealthPct > 96.4 {
+		t.Fatalf("health %v", b.HealthPct)
+	}
+	if b.Cycles == nil || *b.Cycles != 92 || b.CapacityMAh == nil || *b.CapacityMAh != 6016 || b.DesignMAh == nil || *b.DesignMAh != 6249 {
+		t.Fatalf("battery %+v", b)
+	}
+	var none model.Battery
+	batteryHealth(&none, map[string]any{"CycleCount": int64(3)})
+	if none.HealthPct != nil || none.Cycles == nil {
+		t.Fatalf("without capacities: %+v", none)
 	}
 }

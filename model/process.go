@@ -23,9 +23,12 @@ type Process struct {
 	// Footprint is the physical footprint (macOS: ri_phys_footprint, which
 	// counts the process's compressed pages; Activity Monitor's "Memory").
 	// 0: not readable (other users' processes) or not reported (Linux).
-	Footprint    uint64   `json:"footprint,omitempty"`
-	Threads      int32    `json:"threads"`
-	DiskReadBps  *float64 `json:"diskReadBps,omitempty"` // nil = not readable
+	Footprint   uint64   `json:"footprint,omitempty"`
+	Threads     int32    `json:"threads"`
+	DiskReadBps *float64 `json:"diskReadBps,omitempty"` // nil = not readable
+	// PowerMW is the energy the process used since the last sample, as
+	// milliwatts (macOS: ri_energy_nj); nil = not readable.
+	PowerMW      *float64 `json:"powerMW,omitempty"`
 	DiskWriteBps *float64 `json:"diskWriteBps,omitempty"`
 	Ports        []Port   `json:"ports,omitempty"`     // listening
 	AppBundle    string   `json:"appBundle,omitempty"` // macOS only
