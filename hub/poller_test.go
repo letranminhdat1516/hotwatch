@@ -208,13 +208,13 @@ func TestSelectedHostRefreshesProcessesOffPage(t *testing.T) {
 		if got := v.get("a").Procs; len(got) != 1 || got[0].PID != 5 {
 			t.Fatalf("overview view lacks processes: %+v", got)
 		}
-		advance(4 * time.Second) // polls 2 and 3: no fetch
+		advance(8 * time.Second) // polls 2–5 (9 s): no fetch
 		if _, _, p, _ := a.counts(); p != 1 {
-			t.Fatalf("procs after 3 polls = %d, want 1 (every %d)", p, procsEvery)
+			t.Fatalf("procs before %v = %d, want 1", procsOffPage, p)
 		}
-		advance(2 * time.Second) // poll 4
+		advance(2 * time.Second) // poll 6, 10 s after the first fetch
 		if _, _, p, _ := a.counts(); p != 2 {
-			t.Fatalf("procs after 4 polls = %d, want 2", p)
+			t.Fatalf("procs after %v = %d, want 2", procsOffPage, p)
 		}
 		if _, _, p, _ := b.counts(); p != 0 {
 			t.Fatalf("visible host fetched processes %d times", p)
@@ -550,6 +550,25 @@ func TestStopEndsGoroutines(t *testing.T) {
 		advance(10 * time.Second)
 		if len(v.states("a")) != n || len(v.states("e")) != 0 {
 			t.Fatal("published after Stop")
+		}
+	})
+}
+
+func TestOffPageProcessScansDoNotFollowAFastInterval(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a := newCounting()
+		a.InfoV.Caps.Processes = true
+		h, _ := start(t, 500*time.Millisecond, map[string]source.Source{"a": a})
+		defer h.Stop()
+		h.Select("a", "overview")
+		advance(9500 * time.Millisecond) // 20 polls at 0.5 s
+		if _, _, p, _ := a.counts(); p != 1 {
+			t.Fatalf("procs in 9.5 s at 0.5 s polls = %d, want 1", p)
+		}
+		h.Select("a", PageProcesses)
+		advance(2 * time.Second)
+		if _, _, p, _ := a.counts(); p < 4 {
+			t.Fatalf("procs on the Processes page = %d, want every poll", p)
 		}
 	})
 }

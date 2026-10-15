@@ -18,10 +18,11 @@ const (
 	tierSelected
 )
 
-// procsEvery is how many selected-host polls pass between process fetches
-// while the Processes page is not open: the Overview's per-app breakdowns
-// stay fresh without a full process scan every interval.
-const procsEvery = 3
+// procsOffPage is how often the selected host's processes are fetched while
+// the Processes page is not open: the Overview's per-app breakdowns stay
+// fresh without a full process scan every interval (a scan costs far more
+// than a snapshot), however short the interval is.
+const procsOffPage = 10 * time.Second
 
 // host is one source's poller state. reset and force are guarded by Hub.mu;
 // everything below them is owned by the host's goroutine.
@@ -47,7 +48,7 @@ type host struct {
 	hostKey  *transport.HostKeyError
 	polled   bool
 	lastPoll time.Time
-	polls    int // successful polls while selected; paces the off-page process refresh
+	procsAt  time.Time // last process fetch; paces the off-page refresh
 }
 
 func (p *host) poke() {
@@ -190,11 +191,13 @@ func (h *Hub) poll(p *host, t tier, page string) {
 	if t != tierSelected {
 		return
 	}
-	p.polls++
-	// Processes: every poll on their page; otherwise every procsEvery-th
-	// poll for hosts that report them, so the Overview's by-app views have
-	// data on every page. Containers only on the Docker page.
-	wantProcs := page == PageProcesses || (p.info.Caps.Processes && (p.polls-1)%procsEvery == 0)
+	// Processes: every poll on their page; otherwise every procsOffPage for
+	// hosts that report them, so the Overview's by-app views have data on
+	// every page. Containers only on the Docker page.
+	wantProcs := page == PageProcesses || (p.info.Caps.Processes && now.Sub(p.procsAt) >= procsOffPage)
+	if wantProcs {
+		p.procsAt = now
+	}
 	wantCtrs := page == PageDocker
 	if !wantProcs && !wantCtrs {
 		return
