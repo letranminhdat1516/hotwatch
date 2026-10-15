@@ -1,12 +1,17 @@
-// Command iconart draws Hotwatch's app icon, resources/icon.png (1024 px):
-// a rose squircle with a white gauge — an arc of 240° lit two thirds of
-// the way, a needle at that reading and a hub. Everything is computed here
-// (signed distances, 4×4 supersampling); no artwork is copied.
+// Command iconart draws Hotwatch's app icon, resources/icon.png (1024 px).
 //
+// With -logo it places the owner's logo (a PNG on a white ground) on a
+// light squircle: the white ground is dropped, the logo cropped to what
+// is drawn and centred. Without it, it draws a rose squircle with a white
+// gauge. Everything is computed here (signed distances, 4×4 supersampling,
+// area-averaged scaling).
+//
+//	go run ./tools/iconart -logo art/logo-cicca.png resources/icon.png   (the owner's logo)
 //	go run ./tools/iconart resources/icon.png
 package main
 
 import (
+	"flag"
 	"image"
 	"image/color"
 	"image/png"
@@ -26,10 +31,102 @@ const (
 )
 
 func main() {
+	logo := flag.String("logo", "", "the owner's logo, a PNG on white")
+	flag.Parse()
 	out := "resources/icon.png"
-	if len(os.Args) > 1 {
-		out = os.Args[1]
+	if flag.NArg() > 0 {
+		out = flag.Arg(0)
 	}
+	var img *image.NRGBA
+	if *logo != "" {
+		img = logoIcon(*logo)
+	} else {
+		img = gaugeIcon()
+	}
+	f, err := os.Create(out)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		panic(err)
+	}
+}
+
+// logoIcon is the logo at path on a white squircle with a soft shadow.
+func logoIcon(path string) *image.NRGBA {
+	f, err := os.Open(path)
+	if err != nil {
+		panic(err)
+	}
+	src, err := png.Decode(f)
+	f.Close()
+	if err != nil {
+		panic(err)
+	}
+	// The drawn part: anything not near-white.
+	b := src.Bounds()
+	minX, minY, maxX, maxY := b.Max.X, b.Max.Y, b.Min.X, b.Min.Y
+	ink := func(c color.Color) bool {
+		n := color.NRGBAModel.Convert(c).(color.NRGBA)
+		return n.A > 128 && (n.R < 235 || n.G < 235 || n.B < 235)
+	}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if ink(src.At(x, y)) {
+				minX, minY, maxX, maxY = min(minX, x), min(minY, y), max(maxX, x+1), max(maxY, y+1)
+			}
+		}
+	}
+	cw, ch := float64(maxX-minX), float64(maxY-minY)
+	const box = 680.0 // the logo's room inside the 824 px squircle
+	scale := math.Min(box/cw, box/ch)
+	dw, dh := cw*scale, ch*scale
+	ox, oy := (size-dw)/2, (size-dh)/2
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	for py := 0; py < size; py++ {
+		for px := 0; px < size; px++ {
+			x, y := float64(px)+0.5, float64(py)+0.5
+			if !inSquircle(x, y) {
+				d := squircleDist(x, y-14)
+				a := 0.28
+				if d > 0 {
+					a *= math.Exp(-d / 18)
+				}
+				img.SetNRGBA(px, py, color.NRGBA{A: u8(a)})
+				continue
+			}
+			// A white ground, barely warmer at the bottom.
+			t := clamp((y - 100) / 824)
+			r, g, bl := 1.0, 1.0-0.025*t, 1.0-0.02*t
+			if x >= ox && x < ox+dw && y >= oy && y < oy+dh {
+				// Area-average the source pixels under this one.
+				sx0, sy0 := float64(minX)+(x-0.5-ox)/scale, float64(minY)+(y-0.5-oy)/scale
+				var cr, cg, cb, ca, n float64
+				for sy := int(sy0); sy < int(sy0+1/scale)+1 && sy < maxY; sy++ {
+					for sx := int(sx0); sx < int(sx0+1/scale)+1 && sx < maxX; sx++ {
+						c := color.NRGBAModel.Convert(src.At(sx, sy)).(color.NRGBA)
+						a := float64(c.A) / 255
+						cr, cg, cb, ca, n = cr+float64(c.R)/255*a, cg+float64(c.G)/255*a, cb+float64(c.B)/255*a, ca+a, n+1
+					}
+				}
+				if n > 0 && ca > 0 {
+					// Over the ground: the logo's own colours where it is
+					// opaque (transparent or white ground drops out).
+					a := ca / n
+					r, g, bl = r*(1-a)+cr/n, g*(1-a)+cg/n, bl*(1-a)+cb/n
+				}
+			}
+			// Anti-alias the squircle's edge.
+			edge := clamp(-squircleDist(x, y) + 0.5)
+			img.SetNRGBA(px, py, color.NRGBA{R: u8(r), G: u8(g), B: u8(bl), A: u8(edge)})
+		}
+	}
+	return img
+}
+
+// gaugeIcon is the rose squircle with a white gauge.
+func gaugeIcon() *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, size, size))
 	const ss = 4
 	for py := 0; py < size; py++ {
@@ -50,14 +147,7 @@ func main() {
 			img.SetNRGBA(px, py, color.NRGBA{R: u8(r / a), G: u8(g / a), B: u8(b / a), A: u8(a / n)})
 		}
 	}
-	f, err := os.Create(out)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
-		panic(err)
-	}
+	return img
 }
 
 // sample is the colour (0–1, straight alpha) at x, y.

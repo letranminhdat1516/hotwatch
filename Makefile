@@ -16,4 +16,4 @@ run:
 app dmg:         # signed dist/darwin-arm64/Hotwatch.app and its .dmg (mygo.json)
 	$(GO) tool mygo build
 icon:            # redraw resources/icon.png
-	$(GO) run ./tools/iconart resources/icon.png
+	$(GO) run ./tools/iconart -logo art/logo-cicca.png resources/icon.png
