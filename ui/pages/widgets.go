@@ -185,6 +185,7 @@ func showAll(c *ui.Context, key, page string, tint ui.Color) {
 // (helpers count toward their app), how many there are, and the sum.
 type appTotal struct {
 	name, bundle string
+	user         string // the first process's user: a system process shows the gear
 	count        int
 	value        float64
 }
@@ -209,7 +210,7 @@ func groupByApp(ps []model.Process, value func(model.Process) (float64, bool)) [
 		if !seen {
 			i = len(out)
 			idx[key] = i
-			out = append(out, appTotal{name: name, bundle: bundle})
+			out = append(out, appTotal{name: name, bundle: bundle, user: p.User})
 		}
 		out[i].count++
 		out[i].value += v
@@ -226,7 +227,7 @@ func topApps(c *ui.Context, apps []appTotal, n int, value func(float64) string) 
 	ui.Grid(c).Columns(2).GapX(6*g()).GapY(g()+4).Margin(g(), 0, 0, 0).Children(func() {
 		for i, a := range apps {
 			ui.Row(c).Key(fmt.Sprintf("app-%d", i)).Gap(g() + 4).AlignItems(ui.Center).Children(func() {
-				appIcon(c, a.name, a.bundle)
+				userIcon(c, a.name, a.bundle, a.user)
 				ui.Text(c, a.name).FontSize(14).SingleLine().Shrink(1)
 				if a.count > 1 {
 					ui.Text(c, fmt.Sprint(a.count)).FontSize(13).TextColor(t.TextMuted).SingleLine()

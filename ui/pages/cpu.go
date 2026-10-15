@@ -237,7 +237,7 @@ func topCPUCard(c *ui.Context, v hub.HostView) {
 		ui.Grid(c).Columns(2).GapX(4 * g()).GapY(g()).Children(func() {
 			for i, p := range top {
 				ui.Row(c).Key(fmt.Sprintf("top-%d", i)).Gap(g()).AlignItems(ui.Center).Children(func() {
-					appIcon(c, p.Name, p.AppBundle)
+					procIcon(c, &p)
 					ui.Text(c, p.Name).FontSize(13).SingleLine().Grow(1)
 					col := t.Text
 					if p.CPUPct >= 50 {

@@ -638,7 +638,7 @@ func procCell(c *ui.Context, pr *model.Process, id string, now time.Time) {
 	}
 	if id == "name" {
 		ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
-			appIcon(c, pr.Name, pr.AppBundle)
+			procIcon(c, pr)
 			ui.Text(c, s).FontSize(13).TextColor(col).SingleLine()
 		})
 		return

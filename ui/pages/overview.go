@@ -277,7 +277,7 @@ func memoryByApp(c *ui.Context, apps []app, page string, wide bool) {
 					tile.ColumnSpan(2)
 				}
 				tile.Children(func() {
-					appIcon(c, a.name, a.bundle)
+					userIcon(c, a.name, a.bundle, a.user)
 					if big {
 						ui.Spacer(c)
 						ui.Text(c, a.name).FontSize(13).FontWeight(600).SingleLine()
@@ -292,6 +292,7 @@ func memoryByApp(c *ui.Context, apps []app, page string, wide bool) {
 // powerApp is one app's share of the power the processes draw.
 type powerApp struct {
 	name, bundle string
+	user         string
 	mw           float64
 }
 
@@ -313,7 +314,7 @@ func energyByApp(ps []model.Process) []powerApp {
 		if !ok {
 			i = len(out)
 			idx[key] = i
-			out = append(out, powerApp{name: name, bundle: bundle})
+			out = append(out, powerApp{name: name, bundle: bundle, user: p.User})
 		}
 		out[i].mw += *p.PowerMW
 	}
@@ -348,7 +349,7 @@ func energyCard(c *ui.Context, apps []powerApp) {
 		for i, a := range top {
 			fill := float32(a.mw / top[0].mw)
 			ui.Row(c).Key(fmt.Sprintf("energy-%d", i)).Gap(g).AlignItems(ui.Center).Children(func() {
-				appIcon(c, a.name, a.bundle)
+				userIcon(c, a.name, a.bundle, a.user)
 				ui.Column(c).Grow(1).Gap(4).Children(func() {
 					ui.Row(c).Children(func() {
 						ui.Text(c, a.name).FontSize(13).SingleLine().Grow(1)

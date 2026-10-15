@@ -39,6 +39,45 @@ func BundlePath(p string) bool {
 // (daemons, tools) get it instead of initials.
 const Executable = "public.unix-executable"
 
+// NamePrefix and SystemPrefix key a process without an app bundle by its
+// name: the icon of the installed app of that name (the claude tool shows
+// Claude's), else the Unix executable icon, or for a system process the
+// system's gear.
+const (
+	NamePrefix   = "name:"
+	SystemPrefix = "system:"
+)
+
 // Key reports whether k is something a Source may be asked for: a bundle
-// path (BundlePath) or Executable.
-func Key(k string) bool { return k == Executable || BundlePath(k) }
+// path (BundlePath), Executable, or a process name key. A name is only
+// ever compared with installed apps' names, never handed to AppKit.
+func Key(k string) bool {
+	if k == Executable || BundlePath(k) {
+		return true
+	}
+	for _, pre := range []string{NamePrefix, SystemPrefix} {
+		if name, ok := strings.CutPrefix(k, pre); ok {
+			return name != "" && len(name) < 256 && !strings.ContainsAny(name, "/\x00")
+		}
+	}
+	return false
+}
+
+// ForProcess is the key of a process's icon: its outermost app bundle
+// (a helper shows its app), else its name, as a system process when it
+// runs as root or a system account (_spotlight, _windowserver).
+func ForProcess(name, bundle, user string) string {
+	if i := strings.Index(bundle, ".app/"); i >= 0 {
+		bundle = bundle[:i+len(".app")]
+	}
+	if BundlePath(bundle) {
+		return bundle
+	}
+	if name == "" {
+		return Executable
+	}
+	if user == "root" || strings.HasPrefix(user, "_") {
+		return SystemPrefix + name
+	}
+	return NamePrefix + name
+}

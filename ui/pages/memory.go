@@ -213,6 +213,7 @@ func perSecond(v *float64) string {
 type app struct {
 	name   string
 	bundle string // "" for a plain executable
+	user   string // the first process's user
 	procs  int
 	rss    uint64
 }
@@ -241,7 +242,7 @@ func byApp(ps []model.Process) []app {
 		if !ok {
 			i = len(apps)
 			idx[key] = i
-			apps = append(apps, app{name: name, bundle: bundle})
+			apps = append(apps, app{name: name, bundle: bundle, user: p.User})
 		}
 		apps[i].procs++
 		apps[i].rss += m

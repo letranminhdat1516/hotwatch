@@ -4,8 +4,11 @@ package appicon
 
 import (
 	"image"
+	"os"
 	"runtime"
+	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -139,7 +142,52 @@ var (
 	selInitWithBytes   = objc.RegisterName("initWithBytes:length:encoding:")
 	selAutorelease     = objc.RegisterName("autorelease")
 	selCGImage         = objc.RegisterName("CGImageForProposedRect:context:hints:")
+	selInitWithFile    = objc.RegisterName("initWithContentsOfFile:")
 )
+
+// gearIcon is the system's gear (the icon of advanced settings), shown for
+// system processes that are not part of an app.
+const gearIcon = "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/ToolbarAdvanced.icns"
+
+// appDirs are where installed apps live.
+var appDirs = []string{"/Applications", "/Applications/Utilities", "/System/Applications",
+	"/System/Applications/Utilities", "~/Applications"}
+
+var apps struct {
+	sync.Mutex
+	byName map[string]string // lower-cased name without ".app" -> bundle path
+	at     time.Time
+}
+
+// installedApp is the bundle of the installed app named name (ignoring
+// case), "" when there is none. The folders are listed at most once a
+// minute.
+func installedApp(name string) string {
+	apps.Lock()
+	defer apps.Unlock()
+	if apps.byName == nil || time.Since(apps.at) > time.Minute {
+		apps.byName, apps.at = map[string]string{}, time.Now()
+		home, _ := os.UserHomeDir()
+		for _, dir := range appDirs {
+			if rest, ok := strings.CutPrefix(dir, "~"); ok {
+				if home == "" {
+					continue
+				}
+				dir = home + rest
+			}
+			ents, _ := os.ReadDir(dir)
+			for _, e := range ents {
+				if n, ok := strings.CutSuffix(e.Name(), ".app"); ok {
+					key := strings.ToLower(n)
+					if _, seen := apps.byName[key]; !seen {
+						apps.byName[key] = dir + "/" + e.Name()
+					}
+				}
+			}
+		}
+	}
+	return apps.byName[strings.ToLower(name)]
+}
 
 // CoreGraphics, bound once. On arm64 a CGRect (four doubles) travels in
 // four floating-point registers, so CGContextDrawImage takes it as four
@@ -165,6 +213,16 @@ const (
 // the bundle, its CGImage drawn scaled into a premultiplied RGBA context.
 // nil when AppKit has nothing for it.
 func load(bundle string, px int) *ui.Bitmap {
+	img := render(bundle, px)
+	if img == nil {
+		return nil
+	}
+	return ui.NewBitmap(img)
+}
+
+// render draws the icon of bundle into a px×px RGBA image, top row first;
+// nil when AppKit has nothing for it.
+func render(bundle string, px int) *image.RGBA {
 	if appKit() != nil {
 		return nil
 	}
@@ -177,9 +235,22 @@ func load(bundle string, px int) *ui.Bitmap {
 
 	ws := objc.ID(objc.GetClass("NSWorkspace")).Send(selSharedWorkspace)
 	var img objc.ID
-	if bundle == Executable {
+	name, byName := strings.CutPrefix(bundle, NamePrefix)
+	sysName, system := strings.CutPrefix(bundle, SystemPrefix)
+	if system {
+		name, byName = sysName, true
+	}
+	switch app := ""; {
+	case byName && func() bool { app = installedApp(name); return app != "" }():
+		img = ws.Send(selIconForFile, nsString(app))
+	case system:
+		img = objc.ID(objc.GetClass("NSImage")).Send(selAlloc).Send(selInitWithFile, nsString(gearIcon))
+		if img != 0 {
+			img = img.Send(selAutorelease)
+		}
+	case bundle == Executable || byName:
 		img = ws.Send(selIconForFileType, nsString(Executable))
-	} else {
+	default:
 		img = ws.Send(selIconForFile, nsString(bundle))
 	}
 	if img == 0 {
@@ -200,14 +271,9 @@ func load(bundle string, px int) *ui.Bitmap {
 	cgContextDrawImage(ctx, 0, 0, float64(px), float64(px), uintptr(cgImg))
 	cgContextRelease(ctx)
 	runtime.KeepAlive(out)
-	// CoreGraphics' origin is bottom-left: flip the rows.
-	for y := 0; y < px/2; y++ {
-		a, b := out.Pix[y*out.Stride:(y+1)*out.Stride], out.Pix[(px-1-y)*out.Stride:(px-y)*out.Stride]
-		for i := range a {
-			a[i], b[i] = b[i], a[i]
-		}
-	}
-	return ui.NewBitmap(out)
+	// A bitmap context keeps its top row first in memory, as image.RGBA
+	// does, and CGContextDrawImage draws the image upright: no flip.
+	return out
 }
 
 // nsString is an autoreleased NSString of s.

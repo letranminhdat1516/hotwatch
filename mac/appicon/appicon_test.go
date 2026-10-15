@@ -3,6 +3,7 @@ package appicon
 import (
 	"image"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -52,5 +53,27 @@ func TestBundlePathRefusesUntrustedPaths(t *testing.T) {
 func TestExecutableIsAcceptedAsAKey(t *testing.T) {
 	if !Key(Executable) || Key("/etc/passwd") || !Key("/Applications/A.app") {
 		t.Fatal("Key")
+	}
+}
+
+func TestForProcessKeys(t *testing.T) {
+	for _, c := range []struct{ name, bundle, user, want string }{
+		{"Google Chrome Helper (Renderer)", "/Applications/Google Chrome.app/Contents/Frameworks/X.framework/Helpers/H.app", "cicca", "/Applications/Google Chrome.app"},
+		{"claude", "", "cicca", NamePrefix + "claude"},
+		{"cfprefsd", "", "root", SystemPrefix + "cfprefsd"},
+		{"mds_stores", "", "_spotlight", SystemPrefix + "mds_stores"},
+		{"", "", "cicca", Executable},
+	} {
+		if got := ForProcess(c.name, c.bundle, c.user); got != c.want {
+			t.Errorf("ForProcess(%q, %q, %q) = %q, want %q", c.name, c.bundle, c.user, got, c.want)
+		}
+		if !Key(c.want) {
+			t.Errorf("Key(%q) refused", c.want)
+		}
+	}
+	for _, bad := range []string{"name:", "name:../x", "name:a/b", "system:\x00", "name:" + strings.Repeat("a", 300)} {
+		if Key(bad) {
+			t.Errorf("Key(%q) accepted", bad)
+		}
 	}
 }
