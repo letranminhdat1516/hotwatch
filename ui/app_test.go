@@ -44,10 +44,11 @@ func TestOverviewUnknownRatesAreDashes(t *testing.T) {
 	snap := &model.Snapshot{Net: []model.Interface{{Name: "en0", Up: true}}}
 	app := testApp(hub.HostView{Snap: snap})
 	tt := ui.NewTester(app.View, 1200, 800)
-	if !slices.Contains(tt.Texts(), "In —") || !slices.Contains(tt.Texts(), "Out —") {
+	// The headline (Downloading) and the Uploading stat are both unknown.
+	if !slices.Contains(tt.Texts(), "Downloading") || !slices.Contains(tt.Texts(), "Uploading") || count(tt, "—") < 2 {
 		t.Fatalf("nil rates must render as a dash: %q", tt.Texts())
 	}
-	if slices.Contains(tt.Texts(), "In 0 B/s") {
+	if slices.Contains(tt.Texts(), "0 B/s") {
 		t.Fatalf("unknown rate rendered as zero: %q", tt.Texts())
 	}
 }
@@ -69,9 +70,12 @@ func TestOverviewPartialSectionIsUnknown(t *testing.T) {
 		absent  []string
 		unknown []string
 	}{
-		{"cpu", []string{"50.0 %", "25.0 %", "In 2.0 KB/s", "80.0 %"}, []string{"37.5 %", "Load 1.00 / 2.00 / 3.00"}, []string{"—", "Load —"}},
-		{"net", []string{"37.5 %", "50.0 %", "80.0 %"}, []string{"In 2.0 KB/s"}, []string{"In —", "Out —"}},
-		{"battery", []string{"37.5 %", "50.0 %", "In 2.0 KB/s"}, []string{"80.0 %"}, []string{"—"}},
+		// Headlines: memory "4.0 GB" in use, disk "75.0 GB" free, network
+		// "2.0 KB/s" down, battery "80.0 %"; the partial section's figures
+		// are dashes, never zeros.
+		{"cpu", []string{"4.0 GB", "75.0 GB", "2.0 KB/s", "80.0 %", "Load 1m"}, []string{"37.5 %", "1.00", "2.00"}, []string{"—"}},
+		{"net", []string{"37.5 %", "4.0 GB", "80.0 %", "Downloading", "Uploading"}, []string{"2.0 KB/s", "1.0 KB/s"}, []string{"—"}},
+		{"battery", []string{"37.5 %", "4.0 GB", "2.0 KB/s"}, []string{"80.0 %"}, []string{"—"}},
 	}
 	for _, tc := range cases {
 		snap := fullSnap()
@@ -99,8 +103,14 @@ func TestOverviewNetworkSkipsLoopbackAndDownInterfaces(t *testing.T) {
 		{Name: "en0", Up: true, RxBps: f64(1024), TxBps: f64(0)},
 	}}
 	tt := ui.NewTester(testApp(hub.HostView{Snap: snap}).View, 1200, 800)
-	if !slices.Contains(tt.Texts(), "In 1.0 KB/s") || !slices.Contains(tt.Texts(), "Out 0 B/s") {
+	// Downloading 1.0 KB/s from en0 only; Uploading a known 0 B/s.
+	if !slices.Contains(tt.Texts(), "1.0 KB/s") || !slices.Contains(tt.Texts(), "0 B/s") {
 		t.Fatalf("texts %q", tt.Texts())
+	}
+	for _, bad := range []string{"5.0 KB/s", "9.0 KB/s", "7.0 KB/s", "14.0 KB/s"} {
+		if slices.Contains(tt.Texts(), bad) {
+			t.Fatalf("loopback or down interface counted: %q", tt.Texts())
+		}
 	}
 }
 

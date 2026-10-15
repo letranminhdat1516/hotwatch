@@ -71,7 +71,7 @@ func visiblePages(caps model.Caps) []Page {
 }
 
 // SidebarWidth is the fixed width of the left navigation.
-const SidebarWidth = 216
+const SidebarWidth = 200
 
 // Shell builds the window every page shares: a left sidebar (navigation with
 // live values and a host switcher) and the page's content on the right.
@@ -107,12 +107,7 @@ func Shell(c *ui.Context, a *App, content func()) {
 		ui.Column(c).Grow(1).Background(t.Background).Children(func() {
 			ui.Scroll(c).Fill().Children(func() {
 				ui.Column(c).Padding(3*components.Grid).Gap(2*components.Grid).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Gap(2*components.Grid).Children(func() {
-						ui.Text(c, title).FontSize(24).FontWeight(700).Grow(1)
-						if v.Conn.State == hub.Online && !v.Conn.LastOK.IsZero() {
-							ui.Text(c, "Updated "+format.Ago(now.Sub(v.Conn.LastOK))).FontSize(12).TextColor(t.TextMuted).NoWrap()
-						}
-					})
+					ui.Text(c, title).FontSize(22).FontWeight(700)
 					a.noticeBanner(c)
 					if kind, text, ok := banner(v.Conn, now); ok {
 						ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
@@ -142,11 +137,12 @@ func (a *App) sidebar(c *ui.Context, v hub.HostView, now time.Time) {
 	caps := v.Info.Caps
 	ui.Column(c).Width(SidebarWidth).Background(t.Surface).
 		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
+		// The hidden title bar's window controls sit over this strip, which
+		// also drags the window; it is 28 high when there are no controls.
+		bar := c.TitleBar()
+		ui.Row(c).Height(max(bar.Height, 28)).Padding(0, bar.Right, 0, bar.Left).DragWindow()
 		ui.Scroll(c).Grow(1).Children(func() {
-			ui.Column(c).Padding(components.Grid+2, components.Grid).Gap(components.Grid/2).Children(func() {
-				ui.Row(c).Padding(components.Grid/2, components.Grid, components.Grid, components.Grid).Children(func() {
-					ui.Text(c, "Hotwatch").FontSize(15).FontWeight(700).TextColor(t.Accent)
-				})
+			ui.Column(c).Padding(components.Grid/2, components.Grid).Gap(components.Grid/2).Children(func() {
 				for gi, g := range groups {
 					rows := make([]Page, 0, len(g.pages))
 					for _, p := range g.pages {
@@ -178,7 +174,7 @@ func (a *App) navRow(c *ui.Context, p Page, v hub.HostView) {
 	t := c.Theme()
 	selected := p.Key == a.page
 	row := ui.Row(c).Key("nav-"+p.Key).AlignItems(ui.Center).Gap(components.Grid+2).
-		Padding(5, components.Grid).Radius(components.Grid)
+		Padding(3, components.Grid).Radius(components.Grid)
 	switch {
 	case selected:
 		row.Background(t.Accent)
@@ -204,7 +200,11 @@ func (a *App) navRow(c *ui.Context, p Page, v hub.HostView) {
 	row.Children(func() {
 		components.IconTile(c, p.icon, tileBg, iconCol)
 		ui.Text(c, p.Title).FontSize(13).FontWeight(500).TextColor(label).Grow(1).NoWrap()
-		if s := navValue(p.Key, v.Snap); s != "" {
+		s := navValue(p.Key, v.Snap)
+		if p.Key == "processes" && len(v.Procs) > 0 {
+			s = fmt.Sprint(len(v.Procs))
+		}
+		if s != "" {
 			ui.Text(c, s).FontSize(12).TextColor(value).NoWrap()
 		}
 	})
@@ -331,16 +331,16 @@ func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
 			ui.Box(c).Size(10, 10).Radius(5).Background(components.StateColor(t, string(v.Conn.State)))
 			ui.Column(c).Grow(1).Children(func() {
 				ui.Text(c, cur.Name).FontSize(13).FontWeight(600).SingleLine()
-				ui.Text(c, hostSubtitle(cur, v)).FontSize(11).TextColor(t.TextMuted).SingleLine()
+				ui.Text(c, hostSubtitle(cur, v, now)).FontSize(11).TextColor(t.TextMuted).SingleLine()
 			})
 			ui.Icon(c, icons.ChevronDown).FontSize(14).TextColor(t.TextMuted)
 		})
 	})
 }
 
-// hostSubtitle is the small line under the host name: its machine, or its
-// connection state when not online.
-func hostSubtitle(h store.Host, v hub.HostView) string {
+// hostSubtitle is the small line under the host name: uptime and the age of
+// the last update when online, else the connection state.
+func hostSubtitle(h store.Host, v hub.HostView, now time.Time) string {
 	if v.Conn.State != hub.Online {
 		if v.Conn.State == "" {
 			return "—"
@@ -348,7 +348,11 @@ func hostSubtitle(h store.Host, v hub.HostView) string {
 		return string(v.Conn.State)
 	}
 	if v.Snap != nil && v.Snap.Uptime > 0 {
-		return "Up " + format.Duration(v.Snap.Uptime)
+		s := "Up " + format.Duration(v.Snap.Uptime)
+		if !v.Conn.LastOK.IsZero() {
+			s += " · " + format.Ago(now.Sub(v.Conn.LastOK))
+		}
+		return s
 	}
 	if v.Info.OS != "" {
 		return v.Info.OS

@@ -44,7 +44,9 @@ func main() {
 	mygo.App.WhenReady(func() {
 		app := hwui.NewApp(func(string) hub.HostView { return hub.HostView{} }, cfg.Hosts, c.runner, c.onSelect)
 		c.attach(app, warn)
+		// The sidebar draws under the window controls (ui.Context.TitleBar).
 		win = mygo.NewWindow(mygo.WindowOptions{Title: "Hotwatch", Width: 1280, Height: 800, MinWidth: 900, MinHeight: 560,
+			TitleBarStyle: mygo.TitleBarHiddenInset, TrafficLightPosition: &mygo.Point{X: 14, Y: 14},
 			Content: ui.View(app.View)})
 		c.startHub()
 	})

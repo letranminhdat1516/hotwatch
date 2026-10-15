@@ -47,9 +47,10 @@ above it when open.
 ## Overview grid
 
 Three equal columns at every width ≥ 900 (two below); cards stretch to the
-row's height. Order: CPU, Memory, GPU (if any) · Disk, Network, Battery (if
-any) · Memory by Type, Memory by App, Energy by App (if data). Missing cards
-leave the slot empty rather than reflowing the row.
+row's height. Order: CPU, Memory, GPU (if any), Disk, Network, Battery (if
+any), then Memory by Type, Memory by App, Energy by App (if data). Cards
+flow row by row: a host without a GPU or a battery (every remote server)
+would otherwise show holes, so fixed slots were dropped.
 
 ### Metric card anatomy
 

@@ -122,6 +122,9 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 	if len(s.GPUs) > 0 && s.GPUs[0].UtilPct != nil {
 		h.add("gpu", t, *s.GPUs[0].UtilPct)
 	}
+	if s.Battery != nil {
+		h.add("battery", t, s.Battery.ChargePct)
+	}
 }
 
 // Series returns a copy of the named series, oldest first; nil if it has no
