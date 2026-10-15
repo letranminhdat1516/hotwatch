@@ -10,6 +10,7 @@ import (
 	"hotwatch/model"
 	"hotwatch/ui/components"
 	"hotwatch/ui/format"
+	"hotwatch/ui/icons"
 )
 
 // kv is a muted label with its value beside it.
@@ -44,8 +45,9 @@ func vram(used, total *uint64) string {
 	return u + " / " + t
 }
 
-// GPU builds the GPU page: one section per GPU with its utilisation, video
-// memory and temperature, and the last five minutes of the first GPU's use.
+// GPU builds the GPU page (the owner's reference): each GPU's load with
+// its engines, memory and peak over a dot chart, then what it is (About)
+// and how busy each engine is (Engines).
 func GPU(c *ui.Context, v hub.HostView, now time.Time) {
 	if waiting(c, v) {
 		return
@@ -61,30 +63,93 @@ func GPU(c *ui.Context, v hub.HostView, now time.Time) {
 			components.EmptyState(c, "No supported GPU on this host")
 			return
 		}
-		for _, gpu := range s.GPUs {
+		for i, gpu := range s.GPUs {
 			if unknown {
 				gpu = model.GPU{Name: gpu.Name}
 			}
-			section(c, gpu.Name, func() { gpuBody(c, gpu) })
-		}
-		if unknown {
-			return // the newest history point is a carried-over value
-		}
-		components.DotTimeChart(c, "GPU utilisation", "%", []components.Series{{Name: "GPU", Pts: points(v, "gpu")}}, now, metricTint(c, "gpu"))
-		if len(s.GPUs) > 1 {
-			note(c, fmt.Sprintf("Chart shows the first GPU (%s)", s.GPUs[0].Name))
+			graphicsCard(c, v, i, gpu, now)
+			ui.Grid(c).Columns(2).Gap(2 * g()).Children(func() {
+				gpuAboutCard(c, v, gpu)
+				enginesCard(c, gpu)
+			})
 		}
 	})
 }
 
-func gpuBody(c *ui.Context, gpu model.GPU) {
+// graphicsCard is GPU i's load, its engines, memory and peak, and the dot
+// chart of its load (History keeps the first GPU's).
+func graphicsCard(c *ui.Context, v hub.HostView, i int, gpu model.GPU, now time.Time) {
 	tint := metricTint(c, "gpu")
-	components.BarRow(c, "Usage", gpu.UtilPct, format.Percent(gpu.UtilPct), tint)
-	if gpu.MemUsed != nil && gpu.MemTotal != nil && *gpu.MemTotal > 0 {
-		components.BarRow(c, "VRAM", ratio(*gpu.MemUsed, *gpu.MemTotal), format.Percent(ratio(*gpu.MemUsed, *gpu.MemTotal)), tint)
-		note(c, vram(gpu.MemUsed, gpu.MemTotal))
-	} else {
-		kv(c, "VRAM", vram(gpu.MemUsed, gpu.MemTotal))
-	}
-	kv(c, "Temperature", celsius(gpu.TempC))
+	from := now.Add(-components.ChartWindow())
+	pageCard(c, icons.GPU, "Graphics", "gpu", nil, func() {
+		val := format.Unknown
+		if gpu.UtilPct != nil {
+			val = whole(*gpu.UtilPct)
+		}
+		var figs []fig
+		if gpu.RendererPct != nil {
+			figs = append(figs, fig{"Renderer", pctShort(*gpu.RendererPct), ""})
+		}
+		if gpu.TilerPct != nil {
+			figs = append(figs, fig{"Tiler", pctShort(*gpu.TilerPct), ""})
+		}
+		figs = append(figs, fig{"Memory", vram(gpu.MemUsed, gpu.MemTotal), ""})
+		if gpu.TempC != nil {
+			figs = append(figs, fig{"Temperature", degrees(*gpu.TempC), ""})
+		}
+		peak := format.Unknown
+		if v.Hist != nil {
+			if _, p, ok := v.Hist.Stats(gpuSeries(i), from); ok {
+				peak = pctShort(p)
+			}
+		}
+		figs = append(figs, fig{"Peak", peak, ""})
+		headline(c, gpu.Name, val, "%", figs)
+		components.DotChart(c, points(v, gpuSeries(i)), from, now, 100, tint, 200).Margin(g(), 0, 0, 0)
+	})
+}
+
+// gpuAboutCard says what the GPU is and how much memory it holds.
+func gpuAboutCard(c *ui.Context, v hub.HostView, gpu model.GPU) {
+	pageCard(c, icons.Info, "About", "gpu", nil, func() {
+		kvRow(c, "Model", gpu.Name)
+		if n := v.Info.Machine.GPUCores; n > 0 {
+			kvRow(c, "Cores", fmt.Sprint(n))
+		}
+		if gpu.MemUsed != nil {
+			kvRow(c, "Memory in use", format.Bytes(*gpu.MemUsed))
+		}
+		if gpu.MemAlloc != nil {
+			kvRow(c, "Memory allocated", format.Bytes(*gpu.MemAlloc))
+		}
+		switch {
+		case gpu.MemTotal != nil && *gpu.MemTotal > 0:
+			kvRow(c, "Video memory", format.Bytes(*gpu.MemTotal))
+		case v.Info.OS == "darwin" && v.Snap.Memory.Total > 0:
+			kvRow(c, "Unified memory", format.Bytes(v.Snap.Memory.Total))
+		}
+		if gpu.TempC != nil {
+			kvRow(c, "Temperature", degrees(*gpu.TempC))
+		}
+	})
+}
+
+// enginesCard is a bar per engine the driver reports.
+func enginesCard(c *ui.Context, gpu model.GPU) {
+	tint := metricTint(c, "gpu")
+	pageCard(c, icons.Activity, "Engines", "gpu", nil, func() {
+		bar := func(label string, p *float64) {
+			if p == nil {
+				return
+			}
+			labelBar(c, label, "", *p/100, tint, pctShort(*p))
+		}
+		bar("Device", gpu.UtilPct)
+		bar("Renderer", gpu.RendererPct)
+		bar("Tiler", gpu.TilerPct)
+		if gpu.MemUsed != nil && gpu.MemTotal != nil && *gpu.MemTotal > 0 {
+			r := float64(*gpu.MemUsed) / float64(*gpu.MemTotal) * 100
+			bar("Memory", &r)
+		}
+	})
 }

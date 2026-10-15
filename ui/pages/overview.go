@@ -189,10 +189,10 @@ func pill(c *ui.Context, text, tone string) {
 func overviewExtras(c *ui.Context, v hub.HostView) {
 	s := v.Snap
 	if !partial(s, "memory") && s.Memory.Total > 0 {
-		memoryByType(c, s.Memory, v.Info.OS)
+		memoryByType(c, s.Memory, v.Info.OS, "memory")
 	}
 	if apps := byApp(v.Procs); len(apps) > 0 {
-		memoryByApp(c, apps)
+		memoryByApp(c, apps, "memory", false)
 	}
 	if apps := energyByApp(v.Procs); len(apps) > 0 {
 		energyCard(c, apps)
@@ -202,7 +202,7 @@ func overviewExtras(c *ui.Context, v hub.HostView) {
 // memoryByType is the donut of the memory parts with "83% in use" in its
 // middle; on a Mac, cached files are drawn in grey within what is free, and
 // Free is everything not in use, as Activity Monitor counts it.
-func memoryByType(c *ui.Context, m model.Memory, os string) {
+func memoryByType(c *ui.Context, m model.Memory, os, page string) {
 	t := c.Theme()
 	g := float32(components.Grid)
 	segs := segments(m, os)
@@ -222,7 +222,7 @@ func memoryByType(c *ui.Context, m model.Memory, os string) {
 			components.Segment{Label: "Free", Value: free, Muted: true})
 	}
 	colors := components.SegColors(t, legend)
-	linkCard(c, "card-memtype", "memory", components.Surface(c, ui.Column(c).Gap(g))).Children(func() {
+	linkCard(c, "card-memtype", page, components.Surface(c, ui.Column(c).Gap(g))).Children(func() {
 		overviewSectionHeader(c, icons.Memory, "Memory by Type", "memory")
 		ui.Row(c).Gap(3*g).AlignItems(ui.Center).Margin(g, 0, 0, 0).Children(func() {
 			components.Donut(c, ring, 16*g).Center().Children(func() {
@@ -243,29 +243,37 @@ func memoryByType(c *ui.Context, m model.Memory, os string) {
 }
 
 // memoryByApp is a mosaic of the largest apps: the first two as tall
-// tiles, the next one wide, then small tiles with only their icon.
-func memoryByApp(c *ui.Context, apps []app) {
+// tiles, the next one wide, then small tiles with only their icon. wide
+// lays it across a whole page (eight columns, nine apps) instead of a
+// card (four columns, seven apps). It opens page when clicked.
+func memoryByApp(c *ui.Context, apps []app, page string, wide bool) {
 	t := c.Theme()
 	g := float32(components.Grid)
 	var sum uint64
 	for _, a := range apps {
 		sum += a.rss
 	}
-	linkCard(c, "card-memapp", "memory", components.Surface(c, ui.Column(c).Gap(g))).Children(func() {
+	linkCard(c, "card-memapp", page, components.Surface(c, ui.Column(c).Gap(g))).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
 			overviewSectionHeader(c, icons.Apps, "Memory by App", "memory")
 			ui.Spacer(c)
 			ui.Text(c, format.Bytes(sum)+" in all").FontSize(12).TextColor(t.TextMuted).SingleLine()
 		})
-		ui.Grid(c).Columns(4).RowTracks(ui.Fixed(84), ui.Fixed(84)).Gap(g).Margin(g/2, 0, 0, 0).Children(func() {
-			for i, a := range apps[:min(len(apps), 7)] {
+		cols, tiles := 4, 7
+		if wide {
+			cols, tiles = 8, 9
+		}
+		ui.Grid(c).Columns(cols).RowTracks(ui.Fixed(84), ui.Fixed(84)).Gap(g).Margin(g/2, 0, 0, 0).Children(func() {
+			for i, a := range apps[:min(len(apps), tiles)] {
 				tile := ui.Column(c).Key(fmt.Sprintf("tile-%d", i)).Padding(10).Radius(12).Gap(2).
 					Background(t.SurfaceHover).Label(a.name)
 				big := i < 3
-				switch i {
-				case 0, 1:
+				switch {
+				case i < 2 && wide:
+					tile.RowSpan(2).ColumnSpan(2)
+				case i < 2:
 					tile.RowSpan(2)
-				case 2:
+				case i == 2:
 					tile.ColumnSpan(2)
 				}
 				tile.Children(func() {
@@ -500,7 +508,7 @@ func cards(v hub.HostView, now time.Time) []card {
 
 	disk := card{key: "disk", icon: icons.Disk, title: "Disk", value: format.Unknown,
 		stats: unknown3("Reading", "Writing", "Written"), series: "disk.write",
-		layers: []layer{{"disk.write", "#64d2ff"}, {"disk.rw", metricHex("disk")}}}
+		layers: []layer{{"disk.read", readHex}, {"disk.rw", metricHex("disk")}}}
 	if !partial(s, "disks") && len(s.Disks) > 0 {
 		var used, total uint64
 		var reads, writes []*float64

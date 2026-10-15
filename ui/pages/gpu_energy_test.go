@@ -15,6 +15,8 @@ import (
 	"hotwatch/ui/pages"
 )
 
+func ip(v int) *int { return &v }
+
 func u64(v uint64) *uint64 { return &v }
 
 func dur(d time.Duration) *time.Duration { return &d }
@@ -29,22 +31,31 @@ var rtx = model.GPU{Name: "RTX 3080", UtilPct: fp(42), MemUsed: u64(1717986918),
 
 func TestGPUShowsUtilisationVRAMAndTemperature(t *testing.T) {
 	tt := render(pages.GPU, view(gpuSnap(rtx), nil, "linux"))
-	has(t, tt, "RTX 3080", "Usage", "42.0 %", "VRAM", "16.0 %", "1.60 / 10.0 GB", "Temperature", "65.0 °C", "GPU utilisation", "%")
-	lacks(t, tt, "—", "No supported GPU on this host")
+	has(t, tt, "Graphics", "RTX 3080", "42 %", "Memory", "1.60 / 10.0 GB", "Temperature", "65 °C", "Peak",
+		"About", "Video memory", "10.0 GB", "Engines", "Device", "42%", "16%")
+	lacks(t, tt, "No supported GPU on this host", "Unified memory")
 }
 
 func TestGPUVRAMWithOnlyUsedKnown(t *testing.T) {
 	g := rtx
 	g.MemTotal = nil
 	tt := render(pages.GPU, view(gpuSnap(g), nil, "linux"))
-	has(t, tt, "VRAM", "1.60 GB")
-	lacks(t, tt, "1.60 / 10.0 GB", "16.0 %")
+	has(t, tt, "Memory in use", "1.60 GB")
+	lacks(t, tt, "1.60 / 10.0 GB", "16%", "Video memory")
 }
 
 func TestGPUUnknownValuesAreDashes(t *testing.T) {
 	tt := render(pages.GPU, view(gpuSnap(model.GPU{Name: "Apple M3"}), nil, "darwin"))
-	has(t, tt, "Apple M3", "Temperature", "—")
-	lacks(t, tt, "0.0 %", "0.0 °C")
+	has(t, tt, "Apple M3", "—", "Unified memory")
+	lacks(t, tt, "0 %", "0 °C", "Renderer", "Tiler")
+}
+
+func TestGPUAppleEngines(t *testing.T) {
+	m5 := model.GPU{Name: "Apple M5", UtilPct: fp(46), RendererPct: fp(46), TilerPct: fp(14), MemUsed: u64(534 << 20), MemAlloc: u64(2530 << 20)}
+	v := view(gpuSnap(m5), nil, "darwin")
+	v.Info.Machine.GPUCores = 10
+	tt := render(pages.GPU, v)
+	has(t, tt, "46 %", "Renderer", "46%", "Tiler", "14%", "534 MB", "Cores", "10", "Memory allocated", "2.47 GB", "Unified memory")
 }
 
 func TestGPUEmptyState(t *testing.T) {
@@ -54,8 +65,7 @@ func TestGPUEmptyState(t *testing.T) {
 func TestGPUManyGPUsNoteAndSections(t *testing.T) {
 	second := model.GPU{Name: "RTX 3060", UtilPct: fp(7)}
 	tt := render(pages.GPU, view(gpuSnap(rtx, second), nil, "linux"))
-	has(t, tt, "RTX 3080", "RTX 3060", "7.0 %", "Chart shows the first GPU (RTX 3080)")
-	lacks(t, render(pages.GPU, view(gpuSnap(rtx), nil, "linux")), "Chart shows the first GPU (RTX 3080)")
+	has(t, tt, "RTX 3080", "RTX 3060", "7 %")
 }
 
 func TestGPUPartialIsUnknown(t *testing.T) {
@@ -63,7 +73,7 @@ func TestGPUPartialIsUnknown(t *testing.T) {
 	s.Partial = []string{"gpu"}
 	tt := render(pages.GPU, view(s, nil, "linux"))
 	has(t, tt, "—")
-	lacks(t, tt, "42.0 %", "65.0 °C", "1.60 / 10.0 GB", "GPU utilisation")
+	lacks(t, tt, "42 %", "65 °C", "1.60 / 10.0 GB")
 }
 
 func TestGPUWaitsForData(t *testing.T) {
@@ -85,11 +95,22 @@ func energySnap(b *model.Battery) *model.Snapshot {
 
 func TestEnergyShowsChargePowerThermalAndAssertions(t *testing.T) {
 	tt := render(pages.Energy, view(energySnap(battery()), nil, "darwin"))
-	has(t, tt, "87.0 %", "Charging", "Remaining", "1h 15m", "Battery Flow", "12.5 W", "charging",
-		"Adapter", "Connected", "Temperature", "31.0 °C", "Thermal", "Nominal", "Awake", "1 assertion",
-		"Power", "The battery charges at", "Average", "Peak", "Temperatures",
-		"Keeping the Mac awake", "caffeinate", "412", "PreventUserIdleSystemSleep", "Running a build")
-	lacks(t, tt, "—", "On battery", "On AC", "Nothing is preventing sleep")
+	has(t, tt, "87%", "Charging", "Until Full", "1h 15m", "Battery Flow", "12.5 W", "charging",
+		"Adapter", "Connected", "Nominal", "Power", "The battery's flow", "Average", "Peak", "Thermal", "Cool",
+		"Temperatures", "Battery", "31 °C", "Keeping Awake", "caffeinate", "Running a build", "● System",
+		"Power Source", "Drawing from", "Power Adapter", "87% · Charging")
+	lacks(t, tt, "On battery", "Nothing is keeping the Mac awake.")
+}
+
+func TestEnergyAdapterHealthAndWholeComputer(t *testing.T) {
+	b := battery()
+	b.AdapterW, b.AdapterName, b.SystemW = fp(94), "140W USB-C Power Adapter", fp(12.4)
+	b.HealthPct, b.Cycles, b.CapacityMAh, b.DesignMAh = fp(96.3), ip(92), ip(6016), ip(6249)
+	s := energySnap(b)
+	s.StorageTempC = fp(41)
+	tt := render(pages.Energy, view(s, nil, "darwin"))
+	has(t, tt, "96%", "of design capacity", "Cycles", "92", "6,016 mAh", "design 6,249", "94 W", "140W USB-C Power Adapter",
+		"The whole computer draws", "12.4 W", "Storage", "41 °C", "Adapter rating", "Whole computer")
 }
 
 func TestEnergyStateBadges(t *testing.T) {
@@ -138,9 +159,9 @@ func TestEnergyThermalBadges(t *testing.T) {
 func TestEnergyUnknownValuesAreDashes(t *testing.T) {
 	b := &model.Battery{ChargePct: 55}
 	tt := render(pages.Energy, view(energySnap(b), nil, "darwin"))
-	has(t, tt, "55.0 %", "On battery", "Remaining", "Battery Flow", "Adapter", "None", "Temperature", "Thermal", "—", "Nothing is preventing sleep")
-	// No power figure: no Power card, no Temperatures card.
-	lacks(t, tt, "0.0 W", "0.0 °C", "Average", "Peak", "Temperatures")
+	has(t, tt, "55%", "On battery", "Remaining", "Battery Flow", "Adapter", "None", "—", "Nothing is keeping the Mac awake.")
+	// No power figure: no Power card; no temperature: no Temperatures card.
+	lacks(t, tt, "0.0 W", "0 °C", "Average", "Peak", "Temperatures")
 }
 
 func TestEnergyNoBattery(t *testing.T) {
@@ -152,7 +173,7 @@ func TestEnergyPartialIsUnknown(t *testing.T) {
 	s.Partial = []string{"battery"}
 	tt := render(pages.Energy, view(s, nil, "darwin"))
 	has(t, tt, "—")
-	lacks(t, tt, "87.0 %", "Charging", "12.5 W", "31.0 °C", "Nominal", "caffeinate")
+	lacks(t, tt, "87%", "Charging", "12.5 W", "31 °C", "Nominal", "caffeinate")
 }
 
 // TestEnergyGPUImages writes the GPU and Energy pages as PNGs for review.

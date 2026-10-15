@@ -179,8 +179,17 @@ func TestPagesWaitForData(t *testing.T) {
 
 func TestMemoryDarwinSegments(t *testing.T) {
 	tt := render(pages.Memory, view(snap(), procs(), "darwin"))
-	has(t, tt, "App", "Wired", "Compressed", "Free", "Swap 1.00 GB / 4.00 GB", "Warning", "Memory usage")
-	lacks(t, tt, "Cached", "Buffers")
+	has(t, tt, "In use of 16.0 GB", "10.0 GB", "App", "Wired", "Compressed", "Free", "Memory by Type", "in use",
+		"Pressure", "Page-ins", "Swap-outs", "Swap", "Written to disk", "1.00 GB", "Swap size", "4.00 GB", "now")
+	lacks(t, tt, "Buffers")
+}
+
+func TestMemoryPressureAndPaging(t *testing.T) {
+	s := snap()
+	s.Memory.Pressure, s.Memory.PressurePct = "normal", fp(22)
+	s.Memory.PageInsPS, s.Memory.SwapOutsPS = fp(58), fp(0)
+	tt := render(pages.Memory, view(s, nil, "darwin"))
+	has(t, tt, "✓ Normal", "22%", "pressure", "58 /s", "0 /s")
 }
 
 func TestMemoryLinuxSegments(t *testing.T) {
@@ -198,7 +207,7 @@ func TestMemoryPressureBadgeColour(t *testing.T) {
 			t.Errorf("%s colour %v, want %v", state, got, want)
 		}
 	}
-	for state, label := range map[string]string{"normal": "Normal", "warn": "Warning", "critical": "Critical"} {
+	for state, label := range map[string]string{"normal": "✓ Normal", "warn": "! Elevated", "critical": "! Critical"} {
 		s := snap()
 		s.Memory.Pressure = state
 		has(t, render(pages.Memory, view(s, nil, "darwin")), label)
@@ -208,7 +217,7 @@ func TestMemoryPressureBadgeColour(t *testing.T) {
 func TestMemorySwapOff(t *testing.T) {
 	s := snap()
 	s.Memory.SwapTotal, s.Memory.SwapUsed = 0, 0
-	has(t, render(pages.Memory, view(s, nil, "darwin")), "Swap off")
+	has(t, render(pages.Memory, view(s, nil, "darwin")), "Written to disk", "Swap is off or empty.")
 }
 
 func TestMemoryByAppGroupsBundles(t *testing.T) {
@@ -220,53 +229,71 @@ func TestMemoryByAppGroupsBundles(t *testing.T) {
 		{PID: 5, Name: "Ghost", RSS: 0, AppBundle: "/Applications/Ghost.app"},
 	}
 	tt := render(pages.Memory, view(snap(), ps, "darwin"))
-	has(t, tt, "Memory by app", "Safari", "800 MB", "2", "zsh", "15.0 MB")
+	has(t, tt, "Memory by App", "Safari", "800 MB", "2", "zsh", "15.0 MB")
 	lacks(t, tt, "Ghost", "Safari.app", "/Applications/Safari.app")
 	linux := render(pages.Memory, view(snap(), ps, "linux"))
-	lacks(t, linux, "Memory by app")
-	lacks(t, render(pages.Memory, view(snap(), nil, "darwin")), "Memory by app")
+	lacks(t, linux, "Memory by App")
+	lacks(t, render(pages.Memory, view(snap(), nil, "darwin")), "Memory by App")
 }
 
 func TestMemoryTopExcludesUnreadableRSS(t *testing.T) {
 	tt := render(pages.Memory, view(snap(), procs(), "darwin"))
-	has(t, tt, "Top processes by memory", "postgres", "2.00 GB", "python3")
+	has(t, tt, "Using the Most Memory", "postgres", "2.00 GB", "python3")
 	lacks(t, tt, "unreadable")
 }
 
 func TestDiskNilRatesAreDashes(t *testing.T) {
 	tt := render(pages.Disk, view(snap(), procs(), "darwin"))
-	has(t, tt, "/", "apfs", "/data", "ext4", "1.00 MB/s", "—", "Read", "Write", "B/s")
-	// "/data" has neither rate known.
-	n := 0
-	for _, x := range tt.Texts() {
-		if x == "—" {
-			n++
-		}
-	}
-	if n != 5 { // "/" write, "/data" read and write, chart legend Write, postgres read
-		t.Errorf("%d dashes, want 5, in %q", n, tt.Texts())
-	}
-	has(t, tt, "Top processes by disk I/O", "python3", "postgres")
-	lacks(t, tt, "unreadable", "mDNSResponder")
+	has(t, tt, "Disk Activity", "Write", "Read", "Reading and writing", "Reading", "1.00 MB/s", "Writing", "—",
+		"/", "APFS", "/data", "EXT4", "Free of 500 GB", "250 GB · 50%")
+	has(t, tt, "Reading and Writing the Most", "python3", "postgres")
+	lacks(t, tt, "unreadable", "mDNSResponder", "Device")
+}
+
+func TestDiskTotalsNamesAndImages(t *testing.T) {
+	s := snap()
+	s.Disks = []model.Volume{{Mount: "/", FS: "apfs", Device: "disk3", Name: "Macintosh HD", Total: 494 << 30, Used: 364 << 30,
+		ReadBps: fp(1 << 20), WriteBps: fp(0), ReadBytes: u64(6300 << 30), WriteBytes: u64(4110 << 30)},
+		{Mount: "/Volumes/Pulse", FS: "hfs", Device: "/dev/disk8s1", Name: "Pulse", Total: 19 << 20, Used: 15 << 20, Image: true}}
+	tt := render(pages.Disk, view(s, nil, "darwin"))
+	has(t, tt, "Read", "6.15 TB", "Written", "4.01 TB", "since startup", "Macintosh HD", "Free of 494 GB", "130 GB",
+		"disk3", "Disk Images", "1 mounted", "Pulse", "19.0 MB · hfs")
 }
 
 func TestDiskPartialIsUnknown(t *testing.T) {
 	s := snap()
 	s.Partial = []string{"disks"}
 	tt := render(pages.Disk, view(s, nil, "linux"))
-	lacks(t, tt, "apfs", "/data")
+	lacks(t, tt, "APFS", "/data")
 	has(t, tt, "—")
 }
 
 func TestNetworkInterfacesSkipLoopback(t *testing.T) {
 	tt := render(pages.Network, view(snap(), procs(), "darwin"))
-	has(t, tt, "en0", "192.168.1.20, fe80::1", "Up", "5.00 MB/s", "utun3", "Down", "In", "Out")
-	lacks(t, tt, "lo0", "127.0.0.1")
+	has(t, tt, "Downloading", "en0", "IPv4", "192.168.1.20", "5.00 MB/s")
+	lacks(t, tt, "lo0", "127.0.0.1", "utun3") // utun3 is down
+}
+
+func TestNetworkInterfaceCards(t *testing.T) {
+	s := snap()
+	s.Net = []model.Interface{
+		{Name: "en0", Kind: "wifi", Label: "Wi-Fi", Up: true, Addrs: []string{"fe80::1/64", "192.168.100.225/24"}, MAC: "0a:d0:d1:71:85:ce",
+			RxBps: fp(5120), TxBps: fp(30700), RxBytes: u64(1370 << 20), TxBytes: u64(2570 << 20)},
+		{Name: "utun8", Kind: "vpn", Label: "VPN", Up: true, Addrs: []string{"100.123.1.44/32"}, RxBps: fp(0), TxBps: fp(0)},
+		{Name: "utun7", Kind: "vpn", Label: "VPN", Up: true, Addrs: []string{"100.96.0.27/32"}, RxBps: fp(1000), TxBps: fp(0)},
+		{Name: "utun1", Kind: "vpn", Up: true, Addrs: []string{"fe80::9/64"}},
+		{Name: "bridge0", Kind: "bridge", Up: true, Addrs: []string{"10.0.0.1/24"}},
+	}
+	tt := render(pages.Network, view(s, procs(), "darwin"))
+	// The tunnels' traffic is not counted twice in the totals.
+	has(t, tt, "Downloading", "5.00 KB/s", "Received", "1.34 GB", "since startup", "Wi-Fi", "en0", "VPN", "utun7", "VPN 2", "utun8",
+		"Hardware", "0a:d0:d1:71:85:ce", "100.123.1.44")
+	lacks(t, tt, "utun1", "bridge0", "6.00 KB/s")
 }
 
 func TestNetworkListensSortedByPort(t *testing.T) {
 	tt := render(pages.Network, view(snap(), procs(), "darwin"))
-	has(t, tt, "Listening ports", "8765/tcp", "python3", "5353/udp", "22/tcp", "5432/tcp")
+	has(t, tt, "Listening Ports", "8765/tcp", "python3", "5353/udp", "22/tcp", "5432/tcp")
 	texts := tt.Texts()
 	last := -1
 	for _, p := range []string{"22/tcp", "5353/udp", "5432/tcp", "8765/tcp"} {

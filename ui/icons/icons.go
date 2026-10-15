@@ -45,6 +45,20 @@ var (
 	Info         = load("info")
 	Laptop       = load("laptop")
 	Activity     = load("activity")
+	Wifi         = load("wifi")
+	Shield       = load("shield")
+	Layers       = load("layers")
+	Plug         = load("plug")
+	Coffee       = load("coffee")
+	Monitor      = load("monitor")
+	Search       = load("search")
+	Refresh      = load("refresh-cw")
+	Download     = load("download")
+	Folder       = load("folder")
+	Close        = load("x")
+	Swap         = load("arrow-left-right")
+	Gauge        = load("gauge")
+	Globe        = load("globe")
 )
 
 // symbolNames are the SF Symbols the Mac draws in place of each icon (see
@@ -56,6 +70,10 @@ var symbolNames = map[*ui.SVG]string{
 	Offline: "wifi.slash", Warning: "exclamationmark.triangle.fill", ChevronDown: "chevron.down",
 	ChevronRight: "chevron.right", Pause: "pause.fill", Play: "play.fill", Battery: "battery.75percent",
 	Thermometer: "thermometer.medium", Info: "info.circle.fill", Laptop: "laptopcomputer", Activity: "waveform.path.ecg",
+	Wifi: "wifi", Shield: "lock.shield.fill", Layers: "square.stack.3d.up.fill", Plug: "powerplug.fill",
+	Coffee: "cup.and.saucer.fill", Monitor: "display", Search: "magnifyingglass", Refresh: "arrow.clockwise",
+	Download: "arrow.down.circle", Folder: "folder", Close: "xmark", Swap: "arrow.left.arrow.right",
+	Gauge: "gauge.with.dots.needle.33percent", Globe: "globe",
 }
 
 // Symbol is the SF Symbol name for icon, "" when it has none.

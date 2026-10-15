@@ -68,13 +68,25 @@ func macSnap() *model.Snapshot {
 		CPU: model.CPU{Total: 32, PerCore: []float64{66, 34, 22, 15, 12, 6, 14, 6.9, 5, 2}, Load: [3]float64{7.08, 9.92, 12.3},
 			User: fp(25), System: fp(7), TempC: fp(54), TempMaxC: fp(60)},
 		Memory: model.Memory{Total: 24 << 30, Used: 20 << 30, App: 5509 << 20, Wired: 3553 << 20,
-			Compressed: 11468 << 20, Cached: 3205 << 20, SwapTotal: 8 << 30, SwapUsed: 6 << 30, Pressure: "warn"},
-		Disks: []model.Volume{{Mount: "/", FS: "apfs", Total: 494 << 30, Used: 480 << 30, ReadBps: fp(573 << 10), WriteBps: fp(33 << 20)}},
-		Net:   []model.Interface{{Name: "en0", Addrs: []string{"192.168.1.20"}, Up: true, RxBps: fp(27 << 10), TxBps: fp(15 << 10)}},
-		GPUs:  []model.GPU{{Name: "Apple M5", UtilPct: fp(57), MemUsed: up(814 << 20), MemTotal: up(24 << 30)}},
+			Compressed: 11468 << 20, Cached: 3205 << 20, SwapTotal: 8 << 30, SwapUsed: 6 << 30, Pressure: "warn",
+			PressurePct: fp(22), PageInsPS: fp(58), SwapOutsPS: fp(0)},
+		Disks: []model.Volume{{Mount: "/", FS: "apfs", Device: "disk3", Name: "Macintosh HD", Total: 494 << 30, Used: 364 << 30,
+			ReadBps: fp(573 << 10), WriteBps: fp(33 << 20), ReadBytes: up(6300 << 30), WriteBytes: up(4110 << 30)},
+			{Mount: "/Volumes/Pulse", FS: "hfs", Device: "/dev/disk8s1", Name: "Pulse", Total: 19 << 20, Used: 15 << 20, Image: true}},
+		Net: []model.Interface{
+			{Name: "en0", Kind: "wifi", Label: "Wi-Fi", Addrs: []string{"fe80::43c:4834:3379:bcb1/64", "192.168.100.225/24"}, MAC: "0a:d0:d1:71:85:ce",
+				Up: true, RxBps: fp(27 << 10), TxBps: fp(15 << 10), RxBytes: up(1370 << 20), TxBytes: up(2570 << 20)},
+			{Name: "utun8", Kind: "vpn", Label: "VPN", Addrs: []string{"100.123.1.44/32", "fd7a:115c:a1e0::c330:12d/48"},
+				Up: true, RxBps: fp(0), TxBps: fp(0), RxBytes: up(89 << 20), TxBytes: up(313 << 20)},
+			{Name: "utun7", Kind: "vpn", Label: "VPN", Addrs: []string{"100.96.0.27/32", "2606:4700:cf1:1000::16/128"},
+				Up: true, RxBps: fp(1 << 10), TxBps: fp(0), RxBytes: up(28 << 10), TxBytes: up(5 << 10)}},
+		GPUs: []model.GPU{{Name: "Apple M5", UtilPct: fp(46), RendererPct: fp(46), TilerPct: fp(14), MemUsed: up(534 << 20), MemAlloc: up(2530 << 20)}},
+		StorageTempC: fp(41),
 		Battery: &model.Battery{ChargePct: 79, OnAC: true, Charging: true, PowerW: fp(89.6), TempC: fp(31), ThermalState: "nominal",
 			TimeRemaining: dur(63 * time.Minute), HealthPct: fp(96.3),
-			Assertions:    []model.Assertion{{PID: 412, Process: "caffeinate", Type: "PreventUserIdleSystemSleep", Reason: "Running a build"}}},
+			AdapterW: fp(94), AdapterName: "140W USB-C Power Adapter", SystemW: fp(12.4), Cycles: ip(92), CapacityMAh: ip(6016), DesignMAh: ip(6249),
+			Assertions: []model.Assertion{{PID: 501, Process: "WhatsApp", Type: "PreventUserIdleSystemSleep", Reason: "cameracaptured-idleSleepPrevention"},
+				{PID: 777, Process: "caffeinate", Type: "PreventUserIdleSystemSleep", Reason: "caffeinate command-line tool"}}},
 		Uptime: 28*24*time.Hour + 4*time.Hour,
 	}
 }
@@ -144,8 +156,8 @@ func main() {
 	lv.Info.Machine = model.Machine{Model: "MacBook Pro (14-inch, 2025)", ModelID: "Mac17,1", Chip: "Apple M5",
 		PerfCores: 4, EffCores: 6, GPUCores: 10, OSVersion: "26.1", Build: "25B78", Serial: "C02XXXXXXX7K", DisplayW: 3024, DisplayH: 1964, DisplayScale: 2}
 	lv.Procs = []model.Process{
-		{PID: 1, Name: "Google Chrome", RSS: 8<<30 + 70<<20, AppBundle: "/Applications/Google Chrome.app", User: "cicca", CPUPct: 5.1, Threads: 1055, PowerMW: fp(437)},
-		{PID: 2, Name: "node", RSS: 3<<30 + 450<<20, User: "cicca", CPUPct: 66.3, Threads: 40, PowerMW: fp(358)},
+		{PID: 1, Name: "Google Chrome", RSS: 8<<30 + 70<<20, AppBundle: "/Applications/Google Chrome.app", User: "cicca", CPUPct: 5.1, Threads: 1055, PowerMW: fp(437), NetRxBps: fp(2230), NetTxBps: fp(400), DiskReadBps: fp(33600), DiskWriteBps: fp(0)},
+		{PID: 2, Name: "node", RSS: 3<<30 + 450<<20, User: "cicca", CPUPct: 66.3, Threads: 40, PowerMW: fp(358), NetRxBps: fp(8730), NetTxBps: fp(900), DiskReadBps: fp(831000), DiskWriteBps: fp(12000)},
 		{PID: 3, Name: "Docker", RSS: 1<<30 + 380<<20, AppBundle: "/Applications/Docker.app", User: "cicca", CPUPct: 0.7, Threads: 269, PowerMW: fp(83)},
 		{PID: 4, Name: "com.apple.WebKit", RSS: 980 << 20, User: "cicca", CPUPct: 1.8, Threads: 24},
 		{PID: 5, Name: "Code Helper", RSS: 720 << 20, User: "cicca", CPUPct: 12.3, Threads: 37},
@@ -190,3 +202,5 @@ func main() {
 		panic(err)
 	}
 }
+
+func ip(v int) *int { return &v }
