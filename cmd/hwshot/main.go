@@ -80,7 +80,7 @@ func macSnap() *model.Snapshot {
 				Up: true, RxBps: fp(0), TxBps: fp(0), RxBytes: up(89 << 20), TxBytes: up(313 << 20)},
 			{Name: "utun7", Kind: "vpn", Label: "VPN", Addrs: []string{"100.96.0.27/32", "2606:4700:cf1:1000::16/128"},
 				Up: true, RxBps: fp(1 << 10), TxBps: fp(0), RxBytes: up(28 << 10), TxBytes: up(5 << 10)}},
-		GPUs: []model.GPU{{Name: "Apple M5", UtilPct: fp(46), RendererPct: fp(46), TilerPct: fp(14), MemUsed: up(534 << 20), MemAlloc: up(2530 << 20)}},
+		GPUs:         []model.GPU{{Name: "Apple M5", UtilPct: fp(46), RendererPct: fp(46), TilerPct: fp(14), MemUsed: up(534 << 20), MemAlloc: up(2530 << 20)}},
 		StorageTempC: fp(41),
 		Battery: &model.Battery{ChargePct: 79, OnAC: true, Charging: true, PowerW: fp(89.6), TempC: fp(31), ThermalState: "nominal",
 			TimeRemaining: dur(63 * time.Minute), HealthPct: fp(96.3),

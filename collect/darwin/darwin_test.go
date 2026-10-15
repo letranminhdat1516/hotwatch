@@ -64,26 +64,33 @@ func TestCoresMatchSysctl(t *testing.T) {
 // sum; Cached = file-backed + purgeable. vm_stat prints the same kernel
 // counters, so a read taken right after must agree closely.
 func TestMemoryMatchesActivityMonitor(t *testing.T) {
+	// vm_stat runs before and after the sample: memory moves between
+	// reads on a busy Mac, so a value counts as matching when it lies
+	// within the two readings, give or take 3%.
+	before, _ := exec.Command("vm_stat").Output()
 	s, err := New().Sample(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, _ := exec.Command("vm_stat").Output()
+	after, _ := exec.Command("vm_stat").Output()
 	ps := pageSize()
-	pages := func(k string) uint64 { return vmStatPages(out, k) * ps }
 	m := s.Memory
-	app := pages("Anonymous pages") - pages("Pages purgeable")
+	type read func(k string) uint64
+	reader := func(out []byte) read { return func(k string) uint64 { return vmStatPages(out, k) * ps } }
 	for _, c := range []struct {
-		name      string
-		got, want uint64
+		name string
+		got  uint64
+		want func(read) uint64
 	}{
-		{"App", m.App, app},
-		{"Wired", m.Wired, pages("Pages wired down")},
-		{"Compressed", m.Compressed, pages("Pages occupied by compressor")},
-		{"Cached", m.Cached, pages("File-backed pages") + pages("Pages purgeable")},
+		{"App", m.App, func(p read) uint64 { return p("Anonymous pages") - p("Pages purgeable") }},
+		{"Wired", m.Wired, func(p read) uint64 { return p("Pages wired down") }},
+		{"Compressed", m.Compressed, func(p read) uint64 { return p("Pages occupied by compressor") }},
+		{"Cached", m.Cached, func(p read) uint64 { return p("File-backed pages") + p("Pages purgeable") }},
 	} {
-		if diffPct(c.got, c.want) > 3 {
-			t.Errorf("%s = %d, vm_stat gives %d", c.name, c.got, c.want)
+		a, b := c.want(reader(before)), c.want(reader(after))
+		lo, hi := min(a, b), max(a, b)
+		if c.got < lo && diffPct(c.got, lo) > 3 || c.got > hi && diffPct(c.got, hi) > 3 {
+			t.Errorf("%s = %d, vm_stat gives %d before and %d after", c.name, c.got, a, b)
 		}
 	}
 	if m.Used != m.App+m.Wired+m.Compressed {

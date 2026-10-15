@@ -128,21 +128,21 @@ func (a *fakeApp) SetHosts(hs []store.Host) {
 	}
 	a.hosts = append(a.hosts, ids)
 }
-func (a *fakeApp) SelectHost(id string)                       { a.selected = append(a.selected, id) }
-func (a *fakeApp) CloseLogs()                                 { a.closed++ }
-func (a *fakeApp) SetHostPanel(p hwui.HostPanel)              { a.panel = p }
-func (a *fakeApp) SetPost(p func(func()))                     { a.post = p }
-func (a *fakeApp) SetLogsOpener(o pages.LogsOpener)           { a.logs = o }
-func (a *fakeApp) SetIconSource(appicon.Source)               {}
-func (a *fakeApp) SetSymbolSource(symbols.Source)             {}
+func (a *fakeApp) SelectHost(id string)                             { a.selected = append(a.selected, id) }
+func (a *fakeApp) CloseLogs()                                       { a.closed++ }
+func (a *fakeApp) SetHostPanel(p hwui.HostPanel)                    { a.panel = p }
+func (a *fakeApp) SetPost(p func(func()))                           { a.post = p }
+func (a *fakeApp) SetLogsOpener(o pages.LogsOpener)                 { a.logs = o }
+func (a *fakeApp) SetIconSource(appicon.Source)                     {}
+func (a *fakeApp) SetSymbolSource(symbols.Source)                   {}
 func (a *fakeApp) SetApps(apps.Scanner, func(string), func(string)) {}
-func (a *fakeApp) SetPackages(pkgs.Manager)                   {}
-func (a *fakeApp) SetColumnsHook(f func(string, []string))    { a.colHook = f }
-func (a *fakeApp) SetSavedColumns(page string, cols []string) { a.columns[page] = cols }
-func (a *fakeApp) SetFrameHook(f func(time.Time))             { a.frameHook = f }
-func (a *fakeApp) SetNotice(s string)                         { a.notice = s }
-func (a *fakeApp) SetSettings(s store.Settings)               { a.settings = s }
-func (a *fakeApp) SetSettingsHook(f func(store.Settings))     { a.settingsHook = f }
+func (a *fakeApp) SetPackages(pkgs.Manager)                         {}
+func (a *fakeApp) SetColumnsHook(f func(string, []string))          { a.colHook = f }
+func (a *fakeApp) SetSavedColumns(page string, cols []string)       { a.columns[page] = cols }
+func (a *fakeApp) SetFrameHook(f func(time.Time))                   { a.frameHook = f }
+func (a *fakeApp) SetNotice(s string)                               { a.notice = s }
+func (a *fakeApp) SetSettings(s store.Settings)                     { a.settings = s }
+func (a *fakeApp) SetSettingsHook(f func(store.Settings))           { a.settingsHook = f }
 func (a *fakeApp) AskPassphrase(k string, reply func(string, bool)) func() {
 	a.prompts = append(a.prompts, k)
 	if a.answer != nil {

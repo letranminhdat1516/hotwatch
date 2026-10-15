@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -83,6 +84,12 @@ func BenchmarkProcesses3000(b *testing.B) {
 func TestProcesses3000Budget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("budget test skipped with -short")
+	}
+	// The budget is the agent's, on Linux; another OS reading the /proc
+	// fixture from its own file system measures that file system instead
+	// (APFS: ~400 ms). The functional checks run everywhere.
+	if runtime.GOOS != "linux" {
+		t.Skip("scan budget is measured on Linux only (scripts/box.sh)")
 	}
 	c := newAt(bigFixture(t), time.Unix(100, 0))
 	if _, err := c.Processes(ctx()); err != nil { // warm-up and baseline
