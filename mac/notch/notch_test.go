@@ -29,8 +29,8 @@ func TestNotchFromSafeAreaAndAuxiliaryAreas(t *testing.T) {
 
 func TestBarPanelAndHoverZones(t *testing.T) {
 	n := Rect{X: 662, Y: 0, W: 188, H: 37}
-	if bar := IdleBar(n, 88); bar != (Rect{X: 712, Y: 37, W: 88, H: 2}) {
-		t.Fatalf("IdleBar = %+v", bar)
+	if ears := Ears(n, 64, 10); ears != (Rect{X: n.X - 74, Y: n.Y, W: n.W + 148, H: n.H}) {
+		t.Fatalf("Ears = %+v", ears)
 	}
 	p := PanelRect(n, 560, 236)
 	if p != (Rect{X: 476, Y: 0, W: 560, H: 236}) {

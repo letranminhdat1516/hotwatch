@@ -48,9 +48,11 @@ func NotchRect(screen Rect, insetTop, leftMaxX, rightMinX float64) (Rect, bool) 
 	return Rect{X: screen.X + (screen.W-FallbackWidth)/2, Y: screen.Y, W: FallbackWidth, H: insetTop}, true
 }
 
-// IdleBar is the w-wide, 2 DIP bar centred just under the notch.
-func IdleBar(n Rect, w float64) Rect {
-	return Rect{X: n.X + (n.W-w)/2, Y: n.Y + n.H, W: w, H: 2}
+// Ears is the idle nook: the notch widened by ear DIPs on each side, as
+// tall as the notch, plus shoulder DIPs each side for the flared top
+// corners that blend it into the screen's edge.
+func Ears(n Rect, ear, shoulder float64) Rect {
+	return Rect{X: n.X - ear - shoulder, Y: n.Y, W: n.W + 2*(ear+shoulder), H: n.H}
 }
 
 // PanelRect is the island: w × h, centred on the notch, its top at the

@@ -46,7 +46,7 @@ func startNook(c *core, app *hwui.App, main *mygo.Window, off bool) {
 	}
 	bar := newWin(func(cx *ui.Context) {
 		cx.Root().Background(ui.Transparent)
-		nook.Bar(cx, app.HostView(app.Selected()))
+		nook.Ears(cx, app.HostView(app.Selected()), float32(ctl.geo.Notch.W))
 	}, false)
 	var island *mygo.Window
 	bringMain := func() {

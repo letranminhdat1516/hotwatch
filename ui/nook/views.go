@@ -15,12 +15,37 @@ import (
 	"hotwatch/ui/icons"
 )
 
-// Window sizes, DIPs.
+// Sizes, DIPs. The idle nook widens the notch by EarW on each side; the
+// island is PanelW wide (Shoulder on each side of it is the flare of its
+// top corners) and PanelH tall.
 const (
-	BarW   = 88
-	PanelW = 560
-	PanelH = 212
+	EarW     = 64
+	Shoulder = 10
+	PanelW   = 560 + 2*Shoulder
+	PanelH   = 212
 )
+
+// EarsW is the idle window's width for a notch notchW wide.
+func EarsW(notchW float32) float32 { return notchW + 2*(EarW+Shoulder) }
+
+// notchShape is the outline of the notch and everything that grows out of
+// it: a black body x…x+w wide and h tall from the top of the screen, its
+// top corners flared outward by s (so it melts into the bezel like the
+// notch itself) and its bottom corners rounded by b.
+func notchShape(x, y, w, h, s, b float32) *ui.Path {
+	b = min(b, h/2, w/2)
+	p := &ui.Path{}
+	p.MoveTo(x-s, y)
+	p.QuadTo(x, y, x, y+s)
+	p.LineTo(x, y+h-b)
+	p.QuadTo(x, y+h, x+b, y+h)
+	p.LineTo(x+w-b, y+h)
+	p.QuadTo(x+w, y+h, x+w, y+h-b)
+	p.LineTo(x+w, y+s)
+	p.QuadTo(x+w, y, x+w+s, y)
+	p.Close()
+	return p
+}
 
 // The island is always black, like the notch it grows out of, in light and
 // dark mode alike; its text and tints are fixed for that ground.
@@ -36,8 +61,8 @@ var (
 
 // Tile colours on black: the metric hues, lightened.
 var tileHex = map[string]string{
-	"cpu": "#818cf8", "memory": "#34d399", "network": "#2dd4bf", "energy": "#fbbf24",
-	"gpu": "#fb923c", "docker": "#38bdf8", "disk": "#38bdf8",
+	"cpu": "#409cff", "memory": "#30d158", "network": "#40c8e0", "energy": "#ffd60a",
+	"gpu": "#ff375f", "docker": "#64d2ff", "disk": "#ff9f0a",
 }
 
 type tone int
@@ -67,30 +92,73 @@ func barLevels(v hub.HostView) (cpu, mem float64, t tone) {
 	return cpu, mem, t
 }
 
-// Bar is the idle bar: two halves on a faint track, CPU left and memory
-// right, in their colours; amber when either is high, rose when the host
-// is offline.
-func Bar(c *ui.Context, v hub.HostView) {
+// Ears is the idle nook: the notch drawn wider, in the same black, with
+// the CPU on the left ear and the memory on the right, each as a small
+// level meter and its percentage. Amber when either is high; a rose dot
+// and "Offline" when the host is not reachable.
+func Ears(c *ui.Context, v hub.HostView, notchW float32) {
 	cpu, mem, t := barLevels(v)
 	cpuCol, memCol := ui.Hex(tileHex["cpu"]), ui.Hex(tileHex["memory"])
-	switch t {
-	case toneWarn:
-		cpuCol, memCol = amber, amber
-	case toneOffline:
-		cpuCol, memCol, cpu, mem = rose, rose, 1, 1
+	if t == toneWarn {
+		if cpu >= 0.85 {
+			cpuCol = amber
+		}
+		if mem >= 0.85 {
+			memCol = amber
+		}
 	}
-	track := ui.RGBA(255, 255, 255, 0.18)
-	ui.Box(c).Fill().Background(ui.Transparent).Draw(func(p *ui.Painter, r ui.Rect) {
-		half := (r.W - 2) / 2
-		for i, part := range []struct {
-			frac float64
-			col  ui.Color
-		}{{cpu, cpuCol}, {mem, memCol}} {
-			x := r.X + float32(i)*(half+2)
-			p.Fill(ui.Rect{X: x, Y: r.Y, W: half, H: r.H}, track, 1)
-			if part.frac > 0 {
-				p.Fill(ui.Rect{X: x, Y: r.Y, W: max(half*float32(part.frac), 2), H: r.H}, part.col, 1)
+	root := ui.Row(c).Fill().Background(ui.Transparent).AlignItems(ui.Center).Padding(0, Shoulder+8, 0, Shoulder+8)
+	root.Draw(func(p *ui.Painter, r ui.Rect) {
+		p.FillPath(notchShape(r.X+Shoulder, r.Y, r.W-2*Shoulder, r.H, Shoulder, 10), ui.RGB(0, 0, 0))
+	})
+	root.Children(func() {
+		ear := func(frac float64, col ui.Color, end bool) {
+			row := ui.Row(c).Width(EarW - 10).Gap(6).AlignItems(ui.Center)
+			if end {
+				row.Justify(ui.End)
 			}
+			row.Children(func() {
+				if t == toneOffline {
+					if !end {
+						ui.Box(c).Size(6, 6).Radius(3).Background(offlineFg)
+						ui.Text(c, "Offline").FontSize(10).FontWeight(600).TextColor(offlineFg).SingleLine()
+					}
+					return
+				}
+				meter := func() { levelDots(c, frac, col) }
+				label := func() {
+					ui.Text(c, fmt.Sprintf("%.0f%%", frac*100)).FontSize(11).FontWeight(650).TextColor(col).NoWrap().Shrink(0)
+				}
+				if end {
+					label()
+					meter()
+				} else {
+					meter()
+					label()
+				}
+			})
+		}
+		ear(cpu, cpuCol, false)
+		ui.Spacer(c) // the notch
+		ear(mem, memCol, true)
+	})
+	_ = notchW
+}
+
+// levelDots is a five-step meter of small rounded bars, lit to frac.
+func levelDots(c *ui.Context, frac float64, col ui.Color) {
+	lit := int(frac*5 + 0.5)
+	if frac > 0 && lit == 0 {
+		lit = 1
+	}
+	ui.Box(c).Size(5*3+4*2, 12).Draw(func(p *ui.Painter, r ui.Rect) {
+		for i := 0; i < 5; i++ {
+			h := float32(4 + 2*i)
+			cl := col.Alpha(0.25)
+			if i < lit {
+				cl = col
+			}
+			p.Fill(ui.Rect{X: r.X + float32(i)*5, Y: r.Y + r.H - h, W: 3, H: h}, cl, 1.5)
 		}
 	})
 }
@@ -120,19 +188,21 @@ type IslandInput struct {
 // window as Progress goes to 1, and its content once it is nearly open.
 func Island(c *ui.Context, in IslandInput) {
 	p := float32(clamp(in.Progress))
-	w := in.NotchW + (PanelW-in.NotchW)*p
+	// It grows from the idle ears to the full panel.
+	startW := in.NotchW + 2*EarW
+	body := float32(PanelW - 2*Shoulder)
+	w := startW + (body-startW)*p
 	h := in.NotchH + (PanelH-in.NotchH)*p
-	radius := 10 + 14*p
+	radius := 10 + 16*p
 	root := ui.Column(c).Fill().Background(ui.Transparent)
 	root.Draw(func(pt *ui.Painter, r ui.Rect) {
 		x := r.X + (r.W-w)/2
-		// Drawn from above the window's top so only the bottom corners show.
-		pt.Fill(ui.Rect{X: x, Y: r.Y - radius, W: w, H: h + radius}, ui.RGB(0, 0, 0), radius)
+		pt.FillPath(notchShape(x, r.Y, w, h, Shoulder, radius), ui.RGB(0, 0, 0))
 	})
 	if in.Progress < 0.85 {
 		return
 	}
-	root.Padding(0, 18, 12, 18).Gap(8).TextColor(ink).Children(func() {
+	root.Padding(0, 18+Shoulder, 12, 18+Shoulder).Gap(8).TextColor(ink).Children(func() {
 		header(c, in)
 		chips(c, in)
 		tiles(c, in)

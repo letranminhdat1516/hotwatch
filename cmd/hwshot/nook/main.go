@@ -47,15 +47,22 @@ func main() {
 	}
 	in := nook.IslandInput{Progress: progress, NotchW: 185, NotchH: 32, Now: now, Selected: "local", View: v,
 		Hosts: []nook.Chip{{ID: "local", Name: "This Mac", State: hub.Online}, {ID: "box", Name: "agent-box", State: hub.Online}, {ID: "vps", Name: "VPS", State: hub.Offline}}}
+	// Two scenes on a desktop-coloured ground: the idle ears under a menu
+	// bar, then the open island, each from the top of the "screen".
 	view := func(c *mui.Context) {
-		mui.Column(c).Fill().Background(mui.Hex("#b9c7dc")).AlignItems(mui.Center).Children(func() {
-			mui.Box(c).Size(nook.PanelW, nook.PanelH).Children(func() { nook.Island(c, in) })
-			mui.Box(c).Height(40)
-			mui.Box(c).Size(185, 32).Radius(10).Background(mui.RGB(0, 0, 0))
-			mui.Box(c).Size(nook.BarW, 2).Children(func() { nook.Bar(c, v) })
+		mui.Column(c).Fill().Background(mui.Hex("#b9c7dc")).Gap(24).Children(func() {
+			mui.Box(c).Height(70).Children(func() {
+				mui.Box(c).Height(32).Background(mui.Hex("#d5dbe6")).Fill()
+			}).Draw(nil)
+			mui.Row(c).Justify(mui.Center).Margin(-94, 0, 0, 0).Children(func() {
+				mui.Box(c).Size(nook.EarsW(185), 32).Children(func() { nook.Ears(c, v, 185) })
+			})
+			mui.Row(c).Justify(mui.Center).Margin(40, 0, 0, 0).Children(func() {
+				mui.Box(c).Size(nook.PanelW, nook.PanelH).Children(func() { nook.Island(c, in) })
+			})
 		})
 	}
-	img := mui.Render(view, 760, 340, 2)
+	img := mui.Render(view, 760, 380, 2)
 	f, err := os.Create(out)
 	if err != nil {
 		panic(err)

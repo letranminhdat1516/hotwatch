@@ -46,7 +46,7 @@ var n0 = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 
 func TestNookPlacesTheBarAndIslandAroundTheNotch(t *testing.T) {
 	_, bar, island := newNook(t)
-	if bar.bounds != notch.IdleBar(geo.Notch, nook.BarW) || !bar.shown {
+	if bar.bounds != notch.Ears(geo.Notch, nook.EarW, nook.Shoulder) || !bar.shown {
 		t.Fatalf("bar %+v shown %v", bar.bounds, bar.shown)
 	}
 	if island.bounds != notch.PanelRect(geo.Notch, nook.PanelW, nook.PanelH) || island.shown {

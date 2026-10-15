@@ -64,7 +64,7 @@ func (n *nookCtl) relayout() {
 	}
 	n.panel = notch.PanelRect(n.geo.Notch, nook.PanelW, nook.PanelH)
 	n.entry, n.stay = notch.HoverZones(n.geo.Notch, n.panel)
-	n.bar.place(notch.IdleBar(n.geo.Notch, nook.BarW))
+	n.bar.place(notch.Ears(n.geo.Notch, nook.EarW, nook.Shoulder))
 	n.island.place(n.panel)
 	if !n.off {
 		n.bar.show()

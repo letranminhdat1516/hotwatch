@@ -109,5 +109,5 @@ func TestBarLevels(t *testing.T) {
 	if c, m, _ := barLevels(hub.HostView{}); c != 0 || m != 0 {
 		t.Fatalf("no data: %v %v", c, m)
 	}
-	ui.NewTester(func(c *ui.Context) { Bar(c, macView()) }, int(BarW), 2) // draws without data races or panics
+	ui.NewTester(func(c *ui.Context) { Ears(c, macView(), 185) }, int(EarsW(185)), 32) // draws without data races or panics
 }
