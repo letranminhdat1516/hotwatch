@@ -135,7 +135,7 @@ func (a *fakeApp) SetPost(p func(func()))                     { a.post = p }
 func (a *fakeApp) SetLogsOpener(o pages.LogsOpener)           { a.logs = o }
 func (a *fakeApp) SetIconSource(appicon.Source)               {}
 func (a *fakeApp) SetSymbolSource(symbols.Source)             {}
-func (a *fakeApp) SetApps(apps.Scanner, func(string))         {}
+func (a *fakeApp) SetApps(apps.Scanner, func(string), func(string)) {}
 func (a *fakeApp) SetPackages(pkgs.Manager)                   {}
 func (a *fakeApp) SetColumnsHook(f func(string, []string))    { a.colHook = f }
 func (a *fakeApp) SetSavedColumns(page string, cols []string) { a.columns[page] = cols }

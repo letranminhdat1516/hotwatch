@@ -58,3 +58,15 @@ func nameTint(name string) ui.Color {
 		ui.Hex("#f97316"), ui.Hex("#14b8a6"), ui.Hex("#8b5cf6"), ui.Hex("#64748b")}
 	return palette[h%uint32(len(palette))]
 }
+
+// AppIconSized is AppIcon at size DIPs (an inspector's header).
+func AppIconSized(c *ui.Context, name string, bm *ui.Bitmap, size float32) ui.Element {
+	radius := size * 0.22
+	if bm != nil {
+		return ui.Image(c, bm).Size(size, size).Radius(radius).Clip().Shrink(0).Label(name + " icon")
+	}
+	return ui.Row(c).Size(size, size).Radius(radius).Shrink(0).Center().
+		Background(nameTint(name)).Children(func() {
+		ui.Text(c, Initials(name)).FontSize(size*0.4).FontWeight(700).TextColor(ui.RGB(255, 255, 255)).SingleLine()
+	})
+}

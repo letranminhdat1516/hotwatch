@@ -159,9 +159,9 @@ func (a *App) SetPackages(mgr pkgs.Manager) { a.pkgs = pages.NewPackages(mgr, a.
 // SetApps installs the application scanner behind the Apps page and how
 // "Open" launches a bundle; call it after SetPost. nil leaves the page
 // explaining that apps are listed for this Mac only.
-func (a *App) SetApps(scanner apps.Scanner, open func(bundle string)) {
+func (a *App) SetApps(scanner apps.Scanner, open, reveal func(bundle string)) {
 	a.apps = pages.NewApps(scanner, a.post)
-	a.apps.Open = open
+	a.apps.Open, a.apps.Reveal = open, reveal
 }
 
 // SetColumnsHook sets the function called with a page's visible column ids,
@@ -302,7 +302,8 @@ func (a *App) View(c *ui.Context) {
 		case "packages":
 			a.pkgs.Render(c, pages.PackagesInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid})
 		case "apps":
-			a.apps.Render(c, pages.AppsInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid})
+			a.apps.Render(c, pages.AppsInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid,
+				Procs: v.Procs})
 		case "settings":
 			pages.Settings(c, &a.settingsUI, a.settings, a.changeSettings)
 		default:

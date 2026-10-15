@@ -11,8 +11,10 @@ import (
 
 	"hotwatch/hub"
 	"hotwatch/mac/apps"
+	"hotwatch/model"
 	"hotwatch/ui/components"
 	"hotwatch/ui/format"
+	"hotwatch/ui/icons"
 )
 
 var appCols = []ui.TableColumn{
@@ -30,6 +32,8 @@ type AppsInput struct {
 	Now     time.Time
 	Actions *Actions
 	Width   float32
+	// Procs are the host's processes: an app with one is running.
+	Procs []model.Process
 }
 
 // Apps is the Apps page: the applications installed on this Mac, with an
@@ -38,6 +42,8 @@ type AppsInput struct {
 type Apps struct {
 	// Open opens the bundle (the wiring runs `open`); nil hides the button.
 	Open func(bundle string)
+	// Reveal shows the bundle in the Finder; nil hides the button.
+	Reveal func(bundle string)
 	// Spawn runs f off the main thread; tests make it run inline.
 	Spawn func(f func())
 
@@ -61,7 +67,8 @@ type Apps struct {
 	sizing          map[string]bool
 	ask             bool
 	pending         apps.App
-	handled         hub.ActionID // the last uninstall whose result reloaded the list
+	handled         hub.ActionID    // the last uninstall whose result reloaded the list
+	running         map[string]bool // bundles with a running process, this frame
 }
 
 // NewApps returns the page over scanner; post runs a function on the main
@@ -172,13 +179,21 @@ func (p *Apps) Render(c *ui.Context, in AppsInput) {
 	}
 	p.reloadAfterUninstall(in)
 	p.ensure()
+	p.running = map[string]bool{}
+	for _, pr := range in.Procs {
+		if pr.AppBundle != "" {
+			p.running[outerBundle(pr.AppBundle)] = true
+		}
+	}
 	t := c.Theme()
 	ui.Column(c).Gap(2 * g()).Children(func() {
 		ui.Row(c).Gap(2 * g()).AlignItems(ui.Center).Children(func() {
-			ui.SearchField(c, &p.query).Label("Search apps").Bind(&p.search).Width(32 * g())
+			ui.SearchField(c, &p.query).Label("Search apps").Bind(&p.search).Width(36 * g())
 			ui.Spacer(c)
 			if p.loading {
-				ui.Text(c, "Scanning…").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "Scanning…").FontSize(13).TextColor(t.TextMuted)
+			} else {
+				ui.Text(c, p.summary()).FontSize(13).TextColor(t.TextMuted).SingleLine()
 			}
 		})
 		if p.err != nil {
@@ -194,12 +209,11 @@ func (p *Apps) Render(c *ui.Context, in AppsInput) {
 		if hasSel && in.Width > 700 {
 			ui.Row(c).Gap(2 * g()).AlignItems(ui.Stretch).Height(h).Children(func() {
 				p.table(c).Grow(1)
-				components.Surface(c, ui.Column(c)).Width(40 * g()).Children(func() { p.inspector(c, in, sel) })
+				components.Surface(c, ui.Column(c)).Width(44 * g()).Children(func() { p.inspector(c, in, sel) })
 			})
 		} else {
 			p.table(c).Height(h)
 		}
-		p.footer(c)
 	})
 	p.dialog(c, in)
 }
@@ -260,6 +274,9 @@ func (p *Apps) cell(c *ui.Context, a *apps.App, id string) {
 		ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
 			appIcon(c, a.Name, a.Bundle)
 			ui.Text(c, a.Name).FontSize(13).SingleLine()
+			if p.running[a.Bundle] {
+				ui.Box(c).Size(7, 7).Radius(3.5).Background(t.Success).Label("running")
+			}
 		})
 	case "version":
 		text(orDash(a.Version), false)
@@ -298,8 +315,9 @@ func openedText(t time.Time) string {
 	return t.Local().Format("Jan 2, 2006")
 }
 
-func (p *Apps) footer(c *ui.Context) {
-	t := c.Theme()
+// summary is "31 apps · 21.2 GB · 4 running": the size once every bundle
+// is measured.
+func (p *Apps) summary() string {
 	var total uint64
 	sized := 0
 	for _, a := range p.apps {
@@ -312,51 +330,85 @@ func (p *Apps) footer(c *ui.Context) {
 	if sized == len(p.apps) && sized > 0 {
 		s += " · " + format.Bytes(total)
 	}
-	ui.Text(c, s).FontSize(12).TextColor(t.TextMuted)
+	n := 0
+	for _, a := range p.apps {
+		if p.running[a.Bundle] {
+			n++
+		}
+	}
+	if n > 0 {
+		s += fmt.Sprintf(" · %d running", n)
+	}
+	return s
 }
 
-// inspector shows the chosen application and its actions.
+
+// inspector shows the chosen application: its icon and name, the actions
+// (open, move to the Trash, show in the Finder), its details and its path.
 func (p *Apps) inspector(c *ui.Context, in AppsInput, a apps.App) {
 	t := c.Theme()
 	running := in.Actions.Running(in.HostID, a.Bundle)
 	ui.Column(c).Gap(2 * g()).Children(func() {
-		ui.Row(c).Gap(g()).AlignItems(ui.Center).Children(func() {
-			appIcon(c, a.Name, a.Bundle)
-			ui.Column(c).Gap(2).Children(func() {
-				ui.Text(c, a.Name).FontSize(15).FontWeight(600).SingleLine()
+		ui.Row(c).Gap(g() + 4).AlignItems(ui.Center).Children(func() {
+			appIconSized(c, a.Name, a.Bundle, 48)
+			ui.Column(c).Gap(2).Grow(1).Shrink(1).Children(func() {
+				ui.Text(c, a.Name).FontSize(18).FontWeight(700).SingleLine()
 				if a.BundleID != "" {
-					ui.Text(c, a.BundleID).FontSize(12).TextColor(t.TextMuted).SingleLine()
+					ui.Text(c, a.BundleID).FontSize(13).TextColor(t.TextMuted).SingleLine()
 				}
 			})
+			closeBtn := ui.Row(c).Key("app-close").Size(24, 24).Center().Radius(12).Cursor(ui.CursorPointer).Label("Close")
+			if closeBtn.Hovered() {
+				closeBtn.Background(t.SurfaceHover)
+			}
+			if closeBtn.Clicked() {
+				p.sel, p.row = "", -1
+			}
+			closeBtn.Children(func() { components.Glyph(c, icons.Close, 14, t.TextMuted) })
 		})
 		ui.Row(c).Gap(g()).Children(func() {
-			if p.Open != nil && ui.Button(c, "Open").Clicked() {
+			if p.Open != nil && ui.Button(c, "Open").Grow(1).Clicked() {
 				p.Open(a.Bundle)
 			}
 			system := strings.HasPrefix(a.Bundle, "/System/")
-			if ui.Button(c, "Uninstall").Disabled(running || system).Clicked() {
+			trash := ui.Button(c, "Move to Trash…").Grow(1).Disabled(running || system)
+			if !running && !system {
+				trash.TextColor(t.Danger)
+			}
+			if trash.Clicked() {
 				p.pending, p.ask = a, true
 			}
-		})
-		field := func(label, value string) {
-			if value == "" {
-				return
+			if p.Reveal != nil {
+				rv := ui.Row(c).Key("app-reveal").Padding(6, 10).Radius(8).Border(1, t.Border).Center().Cursor(ui.CursorPointer).Label("Show in Finder")
+				if rv.Clicked() {
+					p.Reveal(a.Bundle)
+				}
+				rv.Children(func() { components.Glyph(c, icons.Folder, 15, t.TextMuted) })
 			}
-			ui.Column(c).Gap(2).Children(func() {
-				ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(t.TextMuted)
-				ui.Text(c, value).FontSize(13).Selectable()
-			})
-		}
-		field("Version", a.Version)
-		if n, ok := p.sizes[a.Bundle]; ok {
-			field("Size", format.Bytes(n))
-		}
-		field("Kind", a.Arch)
-		if !a.LastOpened.IsZero() {
-			field("Last opened", a.LastOpened.Local().Format("Jan 2, 2006 15:04"))
-		}
-		field("Source", a.Source)
-		field("Path", a.Bundle)
+		})
+		ui.Text(c, "DETAILS").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g(), 0, 0, 0)
+		ui.Column(c).Gap(g()).Children(func() {
+			kvRow(c, "Version", orDash(a.Version))
+			if n, ok := p.sizes[a.Bundle]; ok {
+				kvRow(c, "Size", format.Bytes(n))
+			} else {
+				kvRow(c, "Size", "…")
+			}
+			kvRow(c, "Kind", orDash(a.Arch))
+			opened := "Never"
+			if !a.LastOpened.IsZero() {
+				opened = a.LastOpened.Local().Format("Jan 2, 2006 15:04")
+			}
+			kvRow(c, "Last opened", opened)
+			kvRow(c, "Source", orDash(a.Source))
+			state := "Not running"
+			if p.running[a.Bundle] {
+				state = "Running"
+			}
+			kvRow(c, "State", state)
+		})
+		ui.Text(c, "PATH").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g(), 0, 0, 0)
+		ui.Text(c, a.Bundle).FontSize(13).Font("Menlo").TextColor(t.TextMuted).Selectable()
 		if act, ok := in.Actions.LastOn(in.HostID, "uninstall", a.Bundle); ok {
 			col := t.TextMuted
 			if act.State == "failed" {

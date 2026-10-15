@@ -174,7 +174,7 @@ func main() {
 		// loads and a short wait lets AppKit answer before the real render.
 		a.SetIconSource(appicon.NewDarwin(func(f func()) { f() }, 40))
 		a.SetPost(func(f func()) { f() })
-		a.SetApps(apps.New(nil), nil) // the real scan of this Mac, delivered inline
+		a.SetApps(apps.New(nil), nil, nil) // the real scan of this Mac, delivered inline
 		a.SetPackages(pkgs.NewManager(nil, nil))
 		mui.Render(a.View, 1440, 900, 1)
 		time.Sleep(1500 * time.Millisecond)

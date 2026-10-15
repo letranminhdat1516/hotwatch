@@ -30,3 +30,16 @@ func appIcon(c *ui.Context, name, bundle string) ui.Element {
 	}
 	return components.AppIcon(c, name, bm)
 }
+
+// appIconSized is appIcon at size DIPs, for an inspector's header.
+func appIconSized(c *ui.Context, name, bundle string, size float32) ui.Element {
+	var bm *ui.Bitmap
+	if iconSource != nil {
+		key := outerBundle(bundle)
+		if key == "" {
+			key = appicon.Executable
+		}
+		bm, _ = iconSource.Icon(key)
+	}
+	return components.AppIconSized(c, name, bm, size)
+}

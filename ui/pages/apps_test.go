@@ -10,6 +10,7 @@ import (
 
 	"hotwatch/hub"
 	"hotwatch/mac/apps"
+	"hotwatch/model"
 	hwui "hotwatch/ui"
 	"hotwatch/ui/pages"
 )
@@ -66,12 +67,12 @@ func TestAppsListsSearchesAndInspects(t *testing.T) {
 	if err := e.tt.Click("Visual Studio Code"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"com.microsoft.VSCode", "/Applications/Visual Studio Code.app", "Uninstall", "Open"} {
+	for _, want := range []string{"com.microsoft.VSCode", "/Applications/Visual Studio Code.app", "Move to Trash…", "Open"} {
 		if !slices.Contains(e.tt.Texts(), want) {
 			t.Errorf("inspector missing %q in %q", want, e.tt.Texts())
 		}
 	}
-	if err := e.tt.Click("Uninstall"); err != nil {
+	if err := e.tt.Click("Move to Trash…"); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(e.tt.Texts(), "Move “Visual Studio Code” to the Trash?") {
@@ -115,5 +116,25 @@ func TestAppsWithoutAScannerExplains(t *testing.T) {
 	}, 1300, 600)
 	if !tt.HasText("Apps are listed for this Mac only") {
 		t.Fatalf("texts %q", tt.Texts())
+	}
+}
+
+func TestAppsMarkRunningApps(t *testing.T) {
+	scan := &apps.Fake{List: sampleApps(), Sizes: map[string]uint64{}}
+	page := pages.NewApps(scan, func(f func()) { f() })
+	page.Spawn = func(f func()) { f() }
+	procs := []model.Process{{PID: 9, Name: "Safari Web Content",
+		AppBundle: "/Applications/Safari.app/Contents/XPCServices/com.apple.WebKit.WebContent.xpc"}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(hwui.Theme(false))
+		page.Render(c, pages.AppsInput{HostID: "local", Now: time.Now(), Actions: pages.NewActions(&hub.FakeRunner{}), Width: 1200, Procs: procs})
+	}, 1300, 900)
+	tt.Frame()
+	tt.Frame()
+	if _, ok := tt.Find("running"); !ok {
+		t.Fatalf("Safari is running but has no dot")
+	}
+	if !slices.Contains(tt.Texts(), "3 apps · 1 running") {
+		t.Fatalf("summary: %q", tt.Texts())
 	}
 }
