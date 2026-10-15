@@ -184,9 +184,6 @@ func TestShellDarkModeSwitchesTokens(t *testing.T) {
 	if light.Surface == dark.Surface || light.Background == dark.Background || light.Accent == dark.Accent {
 		t.Fatal("light and dark tokens must differ")
 	}
-	if light.Accent != ui.Hex("#0f9b8e") {
-		t.Fatalf("light accent %v", light.Accent)
-	}
 }
 
 func TestShellNarrowWindowKeepsEveryPageReachable(t *testing.T) {

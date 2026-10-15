@@ -1,18 +1,27 @@
 # UI design — Overview and shell
 
 Target: the polish of a first-class macOS monitor, with hotwatch's own
-identity (teal accent, Lucide icons). Written before the second visual pass
-so the pass is one coherent change, not a series of tweaks. Numbers are DIPs.
+identity (rose accent, warm neutrals, Lucide icons). Written before the
+second visual pass so the pass is one coherent change, not a series of
+tweaks. Numbers are DIPs.
 
 ## Tokens
 
+Approved by the owner on 2026-10-15 from the Claude Design canvas
+<https://claude.ai/artifact/Auh9cnk3QATuw6PgGgkjSU> (22 artboards: every
+page, light + dark, Linux hosts, Docker, failure states, nook). The accent
+is a stand-in for the owner's portfolio logo colour until the exact hex is
+given; `ui/theme_test.go` pins these values.
+
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `bg` | #f4f5f4 | #111416 | window |
-| `surface` | #ffffff | #1a1e21 | cards, sidebar |
-| `text` / `muted` | #1a2024 / #6b767e | #e6eaec / #929ca4 | copy / labels |
-| `accent` | #0f9b8e | #3cc4b5 | selected row, buttons |
-| metric colours | cpu #3b82f6 · memory #22c55e · gpu #ef4444 · disk #f59e0b · network #14b8a6 · energy #eab308 | same | tiles, titles, charts |
+| `bg` | #f6f3f4 | #121014 | window |
+| `surface` | #ffffff | #1b181c | cards, sidebar |
+| `surfaceHover` / `border` | #efe9eb / #ece6e8 | #262127 / #2a2429 | segmented tracks, neutral tiles / hairlines |
+| `text` / `muted` | #1c1619 / #6f6469 | #ede7e9 / #9a8f94 | copy / labels |
+| `accent` | #e11d48 | #fb7185 | selected row, primary buttons, links, update arrows, focus |
+| `success` / `warning` / `danger` | #15803d / #b45309 / #b91c1c | #4ade80 / #fbbf24 / #f87171 | badges, hot values, offline |
+| metric colours | cpu #6366f1 · memory #10b981 · gpu #f97316 · disk #0ea5e9 · network #14b8a6 · energy #f59e0b | same | tiles, titles, charts — none red, so the accent stays the only red |
 
 Tints are the metric colour at an alpha: `tile` 0.14, `chartBg` 0.10,
 `dotOff` 0.18, `dotOn` 1.0. Card radius 14, chart-backdrop radius 10, tile

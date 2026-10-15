@@ -5,14 +5,16 @@ import "github.com/egoist/mygo/ui"
 // metricHex is the accent colour of each hardware metric, shared by the
 // sidebar tiles and the overview card headers so a metric reads the same
 // everywhere. Keys match the page keys; "battery" shares the Energy page.
+// None of them is red: the rose accent must stay the only red on screen
+// (UI-DESIGN.md "Tokens").
 var metricHex = map[string]string{
-	"cpu":     "#3b82f6",
-	"memory":  "#22c55e",
-	"gpu":     "#ef4444",
-	"disk":    "#f59e0b",
+	"cpu":     "#6366f1",
+	"memory":  "#10b981",
+	"gpu":     "#f97316",
+	"disk":    "#0ea5e9",
 	"network": "#14b8a6",
-	"energy":  "#eab308",
-	"battery": "#22c55e",
+	"energy":  "#f59e0b",
+	"battery": "#f59e0b",
 }
 
 // MetricColor returns the metric's accent colour and whether it has one;
