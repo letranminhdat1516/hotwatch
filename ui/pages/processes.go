@@ -302,7 +302,7 @@ func sortValue(p *model.Process, id string) (num float64, str string, known bool
 	case "cpu":
 		return p.CPUPct, "", true
 	case "mem":
-		return float64(p.RSS), "", p.RSS > 0 // 0: unreadable
+		return float64(p.Mem()), "", p.Mem() > 0 // 0: unreadable
 	case "threads":
 		return float64(p.Threads), "", p.Threads > 0
 	case "ports":
@@ -610,8 +610,8 @@ func procCell(c *ui.Context, pr *model.Process, id string, now time.Time) {
 		s = format.Percent(&pr.CPUPct)
 	case "mem":
 		s = format.Unknown
-		if pr.RSS > 0 {
-			s = format.Bytes(pr.RSS)
+		if m := pr.Mem(); m > 0 {
+			s = format.Bytes(m)
 		}
 	case "threads":
 		s = format.Unknown
@@ -633,7 +633,7 @@ func procCell(c *ui.Context, pr *model.Process, id string, now time.Time) {
 	}
 	// Heavy consumers stand out: half a core or more, or 2 GB and up.
 	col := c.Theme().Text
-	if (id == "cpu" && pr.CPUPct >= 50) || (id == "mem" && pr.RSS >= 2<<30) {
+	if (id == "cpu" && pr.CPUPct >= 50) || (id == "mem" && pr.Mem() >= 2<<30) {
 		col = c.Theme().Warning
 	}
 	if id == "name" {

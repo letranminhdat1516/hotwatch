@@ -94,7 +94,7 @@ func Memory(c *ui.Context, v hub.HostView, now time.Time) {
 		}
 		procSection(c, v, "Top processes by memory", func() {
 			// RSS 0 means unreadable (macOS), not an empty process.
-			top := topProcs(v.Procs, func(p model.Process) bool { return p.RSS > 0 }, func(p model.Process) float64 { return float64(p.RSS) })
+			top := topProcs(v.Procs, func(p model.Process) bool { return p.Mem() > 0 }, func(p model.Process) float64 { return float64(p.Mem()) })
 			table(c, []column{{title: "Name"}, {title: "PID", width: 8 * g(), end: true}, {title: "Memory", width: 10 * g(), end: true}},
 				len(top), func(r, col int) {
 					switch col {
@@ -103,7 +103,7 @@ func Memory(c *ui.Context, v hub.HostView, now time.Time) {
 					case 1:
 						text(c, pid(top[r]), true)
 					case 2:
-						text(c, format.Bytes(top[r].RSS), true)
+						text(c, format.Bytes(top[r].Mem()), true)
 					}
 				})
 		})
@@ -119,29 +119,34 @@ type app struct {
 	rss    uint64
 }
 
-// byApp groups processes by AppBundle, falling back to Name, and returns the
-// topN groups by memory. Processes with RSS 0 (unreadable) are skipped. A
-// bundle is shown by its file name without ".app".
+// byApp groups processes by application, falling back to Name for
+// processes outside a bundle, and returns the topN groups by memory
+// (footprint where known, else RSS). Helpers nested in an app (Chrome's
+// renderers, under Google Chrome.app/…/Helpers/) count toward that app.
+// Processes with no readable memory are skipped. A bundle is shown by its
+// file name without ".app".
 func byApp(ps []model.Process) []app {
 	idx := map[string]int{}
 	var apps []app
 	for _, p := range ps {
-		if p.RSS == 0 {
+		m := p.Mem()
+		if m == 0 {
 			continue
 		}
-		key, name := p.Name, p.Name
+		key, name, bundle := p.Name, p.Name, ""
 		if p.AppBundle != "" {
-			key = p.AppBundle
-			name = strings.TrimSuffix(path.Base(strings.TrimRight(p.AppBundle, "/")), ".app")
+			bundle = outerBundle(p.AppBundle)
+			key = bundle
+			name = strings.TrimSuffix(path.Base(bundle), ".app")
 		}
 		i, ok := idx[key]
 		if !ok {
 			i = len(apps)
 			idx[key] = i
-			apps = append(apps, app{name: name, bundle: p.AppBundle})
+			apps = append(apps, app{name: name, bundle: bundle})
 		}
 		apps[i].procs++
-		apps[i].rss += p.RSS
+		apps[i].rss += m
 	}
 	slices.SortStableFunc(apps, func(a, b app) int {
 		switch {
@@ -156,4 +161,14 @@ func byApp(ps []model.Process) []app {
 		apps = apps[:topN]
 	}
 	return apps
+}
+
+// outerBundle is the outermost *.app directory in a bundle path:
+// "/Applications/A.app/Contents/Helpers/B.app" → "/Applications/A.app".
+func outerBundle(p string) string {
+	p = strings.TrimRight(p, "/")
+	if i := strings.Index(p, ".app/"); i >= 0 {
+		return p[:i+len(".app")]
+	}
+	return p
 }

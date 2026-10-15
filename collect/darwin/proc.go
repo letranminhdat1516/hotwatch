@@ -166,7 +166,8 @@ func readProc(ctx context.Context, gp *gproc.Process, now time.Time, statics map
 	if t, err := gp.TimesWithContext(ctx); err == nil {
 		cur.cpuSecs = t.User + t.System
 	}
-	if r, w, ok := diskIO(gp.Pid); ok {
+	if fp, r, w, ok := rusage(gp.Pid); ok {
+		p.Footprint = fp
 		cur.read, cur.write, cur.haveIO = r, w, true
 	}
 	return &procResult{p: p, key: key, prev: cur, static: st}
@@ -223,7 +224,8 @@ func capCommand(s string) string {
 const (
 	rusageInfoV4      = 4
 	rusageBufSize     = 512 // rusage_info_v4 is 296 bytes
-	offDiskBytesRead  = 144 // ri_diskio_bytesread in <sys/resource.h> rusage_info_v4
+	offFootprint      = 72  // ri_phys_footprint in <sys/resource.h> rusage_info_v4
+	offDiskBytesRead  = 144 // ri_diskio_bytesread
 	offDiskBytesWrite = 152 // ri_diskio_byteswritten
 )
 
@@ -242,18 +244,19 @@ func loadRusage() {
 	rusageFn = fn
 }
 
-// diskIO returns cumulative bytes read/written; ok is false when the call
-// fails (EPERM for other users' processes).
-func diskIO(pid int32) (read, write uint64, ok bool) {
+// rusage reads proc_pid_rusage(RUSAGE_INFO_V4): the physical footprint and
+// cumulative bytes read/written; ok is false when the call fails (EPERM for
+// other users' processes).
+func rusage(pid int32) (footprint, read, write uint64, ok bool) {
 	rusageOnce.Do(loadRusage)
 	if rusageFn == nil {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
 	var buf [rusageBufSize]byte
 	if rusageFn(pid, rusageInfoV4, &buf[0]) != 0 {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
-	return leU64(buf[offDiskBytesRead:]), leU64(buf[offDiskBytesWrite:]), true
+	return leU64(buf[offFootprint:]), leU64(buf[offDiskBytesRead:]), leU64(buf[offDiskBytesWrite:]), true
 }
 
 func leU64(b []byte) uint64 {

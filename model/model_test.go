@@ -122,8 +122,8 @@ func TestDistinctVolumes(t *testing.T) {
 		{Mount: "/", Device: "disk3", Total: 494, Used: 480},
 		{Mount: "/System/Volumes/Data", Device: "disk3", Total: 494, Used: 480},
 		{Mount: "/mnt/ext", Device: "/dev/sdb1", Total: 1000, Used: 100},
-		{Mount: "/net/share", Total: 50},  // no device: counts on its own
-		{Mount: "/net/other", Total: 60},  // likewise, not merged with the one above
+		{Mount: "/net/share", Total: 50}, // no device: counts on its own
+		{Mount: "/net/other", Total: 60}, // likewise, not merged with the one above
 	}
 	got := DistinctVolumes(in)
 	if len(got) != 4 || got[0].Mount != "/" || got[1].Mount != "/mnt/ext" || got[2].Mount != "/net/share" || got[3].Mount != "/net/other" {

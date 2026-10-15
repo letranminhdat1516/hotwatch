@@ -373,3 +373,19 @@ func TestProcessesNoticeAnExecUnderTheSamePID(t *testing.T) {
 		t.Fatalf("after exec the cache still says %q / %q", p.Name, p.Command)
 	}
 }
+
+func TestOwnProcessHasAFootprint(t *testing.T) {
+	ps, err := New().Processes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range ps {
+		if p.PID == int32(os.Getpid()) {
+			if p.Footprint == 0 || p.Footprint > 64<<30 {
+				t.Fatalf("own footprint %d (RSS %d)", p.Footprint, p.RSS)
+			}
+			return
+		}
+	}
+	t.Fatal("own process not listed")
+}
