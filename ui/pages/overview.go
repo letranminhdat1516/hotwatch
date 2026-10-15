@@ -237,7 +237,7 @@ func cards(s *model.Snapshot) []card {
 	diskDetail := format.Unknown
 	if !partial(s, "disks") && len(s.Disks) > 0 {
 		var used, total uint64
-		for _, d := range s.Disks {
+		for _, d := range model.DistinctVolumes(s.Disks) {
 			used += d.Used
 			total += d.Total
 		}

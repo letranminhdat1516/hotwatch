@@ -116,3 +116,31 @@ func TestConstants(t *testing.T) {
 		t.Fatal("constants")
 	}
 }
+
+func TestDistinctVolumes(t *testing.T) {
+	in := []Volume{
+		{Mount: "/", Device: "disk3", Total: 494, Used: 480},
+		{Mount: "/System/Volumes/Data", Device: "disk3", Total: 494, Used: 480},
+		{Mount: "/mnt/ext", Device: "/dev/sdb1", Total: 1000, Used: 100},
+		{Mount: "/net/share", Total: 50},  // no device: counts on its own
+		{Mount: "/net/other", Total: 60},  // likewise, not merged with the one above
+	}
+	got := DistinctVolumes(in)
+	if len(got) != 4 || got[0].Mount != "/" || got[1].Mount != "/mnt/ext" || got[2].Mount != "/net/share" || got[3].Mount != "/net/other" {
+		t.Fatalf("DistinctVolumes = %+v", got)
+	}
+	var total uint64
+	for _, v := range got {
+		total += v.Total
+	}
+	if total != 494+1000+50+60 {
+		t.Fatalf("capacity summed = %d, want container once", total)
+	}
+	if DistinctVolumes(nil) == nil || len(DistinctVolumes(nil)) != 0 {
+		t.Fatal("nil input should give an empty, non-nil slice")
+	}
+	// Nothing to identify them by: never merged.
+	if got := DistinctVolumes([]Volume{{Total: 1}, {Total: 2}}); len(got) != 2 {
+		t.Fatalf("anonymous volumes merged: %+v", got)
+	}
+}

@@ -86,3 +86,55 @@ func TestHistoryNetSkipsLoopbackAndDownInterfaces(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryTotalIntegratesRates(t *testing.T) {
+	h := NewHistory()
+	t0 := time.Unix(100, 0)
+	rx := func(v float64) model.Snapshot {
+		return model.Snapshot{Net: []model.Interface{{Name: "en0", Up: true, RxBps: fp(v)}}}
+	}
+	h.Push(t0, rx(10))
+	if _, ok := h.Total("net.rx"); ok {
+		t.Fatal("total known after one sample")
+	}
+	h.Push(t0.Add(2*time.Second), rx(10)) // 10 B/s for 2 s = 20
+	h.Push(t0.Add(4*time.Second), rx(30)) // (10+30)/2 for 2 s = 40
+	if got, ok := h.Total("net.rx"); !ok || got != 60 {
+		t.Fatalf("total = %v %v, want 60", got, ok)
+	}
+	if _, ok := h.Total("net.tx"); ok {
+		t.Fatal("tx was never sampled")
+	}
+}
+
+func TestHistoryStatsOverWindow(t *testing.T) {
+	h := NewHistory()
+	t0 := time.Unix(100, 0)
+	for i, v := range []float64{90, 10, 20, 60} {
+		h.Push(t0.Add(time.Duration(i)*time.Second), model.Snapshot{CPU: model.CPU{Total: v}})
+	}
+	if avg, peak, ok := h.Stats("cpu", t0.Add(time.Second)); !ok || avg != 30 || peak != 60 {
+		t.Fatalf("stats = %v/%v/%v, want 30/60 with the first point excluded", avg, peak, ok)
+	}
+	if _, _, ok := h.Stats("cpu", t0.Add(time.Minute)); ok {
+		t.Fatal("stats with no points in the window")
+	}
+	if _, _, ok := h.Stats("nope", t0); ok {
+		t.Fatal("unknown series")
+	}
+}
+
+func TestHistoryDisksCountedOncePerDevice(t *testing.T) {
+	h := NewHistory()
+	h.Push(time.Unix(1, 0), model.Snapshot{Disks: []model.Volume{
+		{Mount: "/", Device: "disk3", ReadBps: fp(5), WriteBps: fp(1)},
+		{Mount: "/System/Volumes/Data", Device: "disk3", ReadBps: fp(5), WriteBps: fp(1)},
+		{Mount: "/mnt/ext", Device: "/dev/sdb1", ReadBps: fp(2)},
+	}})
+	if p := h.Series("disk.read"); len(p) != 1 || p[0].V != 7 {
+		t.Fatalf("disk.read = %+v, want 7 (container once + ext)", p)
+	}
+	if p := h.Series("disk.write"); len(p) != 1 || p[0].V != 1 {
+		t.Fatalf("disk.write = %+v, want 1", p)
+	}
+}

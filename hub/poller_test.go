@@ -169,6 +169,36 @@ func TestPageData(t *testing.T) {
 	})
 }
 
+func TestSelectedHostRefreshesProcessesOffPage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a, b := newCounting(), newCounting()
+		a.InfoV.Caps.Processes, b.InfoV.Caps.Processes = true, true
+		a.Procs = []model.Process{{PID: 5}}
+		h, v := start(t, 2*time.Second, map[string]source.Source{"a": a, "b": b})
+		defer h.Stop()
+		h.SetVisible([]string{"a", "b"})
+		h.Select("a", "overview")
+		advance(time.Second) // the first poll fetches at once
+		if _, _, p, _ := a.counts(); p != 1 {
+			t.Fatalf("procs after first poll = %d, want 1", p)
+		}
+		if got := v.get("a").Procs; len(got) != 1 || got[0].PID != 5 {
+			t.Fatalf("overview view lacks processes: %+v", got)
+		}
+		advance(4 * time.Second) // polls 2 and 3: no fetch
+		if _, _, p, _ := a.counts(); p != 1 {
+			t.Fatalf("procs after 3 polls = %d, want 1 (every %d)", p, procsEvery)
+		}
+		advance(2 * time.Second) // poll 4
+		if _, _, p, _ := a.counts(); p != 2 {
+			t.Fatalf("procs after 4 polls = %d, want 2", p)
+		}
+		if _, _, p, _ := b.counts(); p != 0 {
+			t.Fatalf("visible host fetched processes %d times", p)
+		}
+	})
+}
+
 func TestPageErrorsReachView(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		a := newCounting()

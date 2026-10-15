@@ -109,7 +109,12 @@ func (c *collector) sampleDisks(ctx context.Context, at time.Time, out *[]model.
 			continue
 		}
 		seen[p.Mountpoint] = true
-		v := model.Volume{Mount: p.Mountpoint, FS: p.Fstype, Total: u.Total, Used: u.Used}
+		v := model.Volume{Mount: p.Mountpoint, FS: p.Fstype, Device: p.Device, Total: u.Total, Used: u.Used}
+		if strings.EqualFold(p.Fstype, "apfs") {
+			if name := bsdName(p.Device); name != "" {
+				v.Device = name // volumes of one container share its capacity
+			}
+		}
 		if name := bsdName(p.Device); name != "" && c.prevDisk != nil {
 			if stores := c.physical(ctx, name, cur); stores != nil {
 				p, ok1 := sumIO(c.prevDisk, stores)

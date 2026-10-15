@@ -18,6 +18,11 @@ const (
 	tierSelected
 )
 
+// procsEvery is how many selected-host polls pass between process fetches
+// while the Processes page is not open: the Overview's per-app breakdowns
+// stay fresh without a full process scan every interval.
+const procsEvery = 3
+
 // host is one source's poller state. reset and force are guarded by Hub.mu;
 // everything below them is owned by the host's goroutine.
 type host struct {
@@ -42,6 +47,7 @@ type host struct {
 	hostKey  *transport.HostKeyError
 	polled   bool
 	lastPoll time.Time
+	polls    int // successful polls while selected; paces the off-page process refresh
 }
 
 func (p *host) poke() {
@@ -181,13 +187,21 @@ func (h *Hub) poll(p *host, t tier, page string) {
 	// Publish the snapshot now; page data may be slow.
 	h.emit(p)
 
-	if t != tierSelected || (page != PageProcesses && page != PageDocker) {
+	if t != tierSelected {
+		return
+	}
+	p.polls++
+	// Processes: every poll on their page; otherwise every procsEvery-th
+	// poll for hosts that report them, so the Overview's by-app views have
+	// data on every page. Containers only on the Docker page.
+	wantProcs := page == PageProcesses || (p.info.Caps.Processes && (p.polls-1)%procsEvery == 0)
+	wantCtrs := page == PageDocker
+	if !wantProcs && !wantCtrs {
 		return
 	}
 	// Page data is best effort: a failure keeps the previous list, is
 	// reported in the view, and never changes the connection state.
-	switch page {
-	case PageProcesses:
+	if wantProcs {
 		v, err := p.src.Processes(p.ctx)
 		if p.ctx.Err() != nil {
 			return
@@ -196,7 +210,8 @@ func (h *Hub) poll(p *host, t tier, page string) {
 			p.procs = v
 		}
 		p.procsErr = err
-	case PageDocker:
+	}
+	if wantCtrs {
 		v, err := p.src.Containers(p.ctx)
 		if p.ctx.Err() != nil {
 			return

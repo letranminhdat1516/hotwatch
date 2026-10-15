@@ -128,7 +128,8 @@ func (c *collector) sampleDisks(ctx context.Context, now time.Time, out *[]model
 			ok = false
 			continue
 		}
-		v := model.Volume{Mount: m.mount, FS: m.fs, Total: total, Used: total - min(free, total)}
+		// Device lets bind mounts of one device count their capacity once.
+		v := model.Volume{Mount: m.mount, FS: m.fs, Device: m.dev, Total: total, Used: total - min(free, total)}
 		dev := filepath.Base(m.dev)
 		if cur, found := stats[dev]; found && strings.HasPrefix(m.dev, "/dev/") {
 			if prev, had := c.prevDisk[dev]; had {

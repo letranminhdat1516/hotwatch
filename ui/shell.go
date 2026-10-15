@@ -231,7 +231,7 @@ func navValue(page string, s *model.Snapshot) string {
 	case "disk":
 		var sum float64
 		ok := false
-		for _, d := range s.Disks {
+		for _, d := range model.DistinctVolumes(s.Disks) {
 			for _, r := range []*float64{d.ReadBps, d.WriteBps} {
 				if r != nil {
 					sum += *r
