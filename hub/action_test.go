@@ -164,7 +164,7 @@ func TestRunnerTimeout(t *testing.T) {
 			return ctx.Err()
 		}
 		r := NewRunner(exec, func(Action) {})
-		id := r.Start(Action{Kind: "package", HostID: "h1", Target: "x", State: "confirming"})
+		id := r.Start(Action{Kind: "container", HostID: "h1", Target: "x", State: "confirming"})
 		time.Sleep(69 * time.Second)
 		synctest.Wait()
 		if r.Get(id).State != "running" {
@@ -393,6 +393,31 @@ func TestRunnerStartAfterStopFails(t *testing.T) {
 		id := r.Start(Action{Kind: "package", HostID: "h1", Target: "x", State: "confirming"})
 		synctest.Wait()
 		if got := r.Get(id); got.State != "failed" || got.Err == nil || got.Err.Code != "cancelled" || called {
+			t.Fatalf("got %+v", got)
+		}
+	})
+}
+
+func TestPackageTasksGetTenMinutes(t *testing.T) {
+	if got := timeoutFor("package"); got != 10*time.Minute {
+		t.Fatalf("package timeout %v, want 10m: brew upgrades take minutes", got)
+	}
+	if got := timeoutFor("container"); got != actionTimeout {
+		t.Fatalf("container timeout %v, want %v", got, actionTimeout)
+	}
+}
+
+func TestPackageTimeoutMessageNamesTenMinutes(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		exec := func(ctx context.Context, _ *Action, _ func(string)) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		r := NewRunner(exec, func(Action) {})
+		id := r.Start(Action{Kind: "package", HostID: "h1", Target: "formula:go", State: "confirming"})
+		time.Sleep(11 * time.Minute)
+		synctest.Wait()
+		if got := r.Get(id); got.Err == nil || got.Err.Message != "action timed out after 10m" {
 			t.Fatalf("got %+v", got)
 		}
 	})

@@ -58,8 +58,12 @@ func (f *Fake) Run(ctx context.Context, verb, name string) (<-chan string, func(
 		}
 		f.Mu.Lock()
 		defer f.Mu.Unlock()
+		_, bare, ok := strings.Cut(name, ":") // targets are "kind:name"
+		if !ok {
+			bare = name
+		}
 		for i := range f.Pkgs {
-			if f.Pkgs[i].Name == name || verb == "upgrade-all" {
+			if f.Pkgs[i].Name == bare || verb == "upgrade-all" {
 				f.Pkgs[i].Outdated = false
 				f.Pkgs[i].Version = f.Pkgs[i].Newest
 			}

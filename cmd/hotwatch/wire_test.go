@@ -29,6 +29,7 @@ import (
 	"hotwatch/internal/sshtest"
 	"hotwatch/mac/appicon"
 	"hotwatch/mac/apps"
+	"hotwatch/mac/pkgs"
 	"hotwatch/model"
 	"hotwatch/source"
 	"hotwatch/store"
@@ -133,6 +134,7 @@ func (a *fakeApp) SetPost(p func(func()))                     { a.post = p }
 func (a *fakeApp) SetLogsOpener(o pages.LogsOpener)           { a.logs = o }
 func (a *fakeApp) SetIconSource(appicon.Source)               {}
 func (a *fakeApp) SetApps(apps.Scanner, func(string))         {}
+func (a *fakeApp) SetPackages(pkgs.Manager)                   {}
 func (a *fakeApp) SetColumnsHook(f func(string, []string))    { a.colHook = f }
 func (a *fakeApp) SetSavedColumns(page string, cols []string) { a.columns[page] = cols }
 func (a *fakeApp) SetFrameHook(f func(time.Time))             { a.frameHook = f }

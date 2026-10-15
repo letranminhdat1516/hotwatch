@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	actionTimeout = 70 * time.Second // agent action timeout is 60 s
-	maxActionLog  = 500
+	actionTimeout  = 70 * time.Second // agent action timeout is 60 s
+	packageTimeout = 10 * time.Minute // brew/mise upgrades download and build
+	maxActionLog   = 500
 )
 
 // Executor performs a's work, reporting progress through log. The Action it
@@ -54,6 +55,22 @@ func NewRunner(exec Executor, publish func(Action)) *ActionRunner {
 		busy:    map[string]ActionID{},
 		cancels: map[ActionID]context.CancelFunc{},
 	}
+}
+
+// shortTimeout is "70s" or "10m".
+func shortTimeout(d time.Duration) string {
+	if d%time.Minute == 0 {
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	}
+	return fmt.Sprintf("%ds", int(d/time.Second))
+}
+
+// timeoutFor is how long an action of kind may run before it is cancelled.
+func timeoutFor(kind ActionKind) time.Duration {
+	if kind == "package" {
+		return packageTimeout
+	}
+	return actionTimeout
 }
 
 func cloneAction(a *Action) Action {
@@ -150,7 +167,7 @@ func (r *ActionRunner) begin(a Action) (st startedAction, ok bool) {
 	a.Seq = 1
 	r.actions[a.ID] = &a
 	r.busy[key] = a.ID
-	ctx, cancel := context.WithTimeout(context.Background(), actionTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutFor(a.Kind))
 	r.cancels[a.ID] = cancel
 	r.wg.Add(1)
 	out := cloneAction(&a)
@@ -221,7 +238,7 @@ func (r *ActionRunner) finisher(err, ctxErr error, skipped bool) func(a *Action)
 		case skipped && errors.Is(ctxErr, context.Canceled), errors.Is(err, context.Canceled) && errors.Is(ctxErr, context.Canceled) && r.stopped:
 			a.State = "cancelled"
 		case errors.Is(ctxErr, context.DeadlineExceeded) && (skipped || errors.Is(err, context.DeadlineExceeded)):
-			a.State, a.Err = "failed", apiErr("timeout", "action timed out after 70s")
+			a.State, a.Err = "failed", apiErr("timeout", "action timed out after "+shortTimeout(timeoutFor(a.Kind)))
 		default:
 			a.State, a.Err = "failed", toAPIError(err)
 		}

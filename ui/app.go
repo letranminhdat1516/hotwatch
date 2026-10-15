@@ -10,6 +10,7 @@ import (
 	"hotwatch/hub"
 	"hotwatch/mac/appicon"
 	"hotwatch/mac/apps"
+	"hotwatch/mac/pkgs"
 	"hotwatch/store"
 	"hotwatch/ui/components"
 	"hotwatch/ui/pages"
@@ -35,6 +36,7 @@ type App struct {
 	procs     *pages.Processes
 	docker    *pages.Docker
 	apps      *pages.Apps
+	pkgs      *pages.Packages
 	post      func(func()) // SetPost: the main-thread hop handed to pages
 	onColumns func(page string, cols []string)
 
@@ -70,7 +72,7 @@ type App struct {
 func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.Runner, onSelect func(hostID, page string)) *App {
 	a := &App{hosts: slices.Clone(hosts), actions: actions, onSelect: onSelect, page: "overview",
 		views: map[string]hub.HostView{}, held: map[string]hub.HostView{}, now: time.Now, windowIdx: 1,
-		acts: pages.NewActions(actions), procs: pages.NewProcesses(), docker: pages.NewDocker(), apps: pages.NewApps(nil, nil)}
+		acts: pages.NewActions(actions), procs: pages.NewProcesses(), docker: pages.NewDocker(), apps: pages.NewApps(nil, nil), pkgs: pages.NewPackages(nil, nil)}
 	a.procs.OnColumns = func(cols []string) {
 		if a.onColumns != nil {
 			a.onColumns("processes", cols)
@@ -147,6 +149,10 @@ func (a *App) SetPost(post func(func())) {
 	a.post = post
 	a.docker.SetPost(post)
 }
+
+// SetPackages installs the brew/mise manager behind the Packages page;
+// call it after SetPost.
+func (a *App) SetPackages(mgr pkgs.Manager) { a.pkgs = pages.NewPackages(mgr, a.post) }
 
 // SetApps installs the application scanner behind the Apps page and how
 // "Open" launches a bundle; call it after SetPost. nil leaves the page
@@ -287,6 +293,8 @@ func (a *App) View(c *ui.Context) {
 			a.docker.Render(c, pages.DockerInput{HostID: a.selected, View: v, Gen: a.gen, Now: a.now(), Actions: a.acts})
 		case "about":
 			pages.About(c, v, a.now())
+		case "packages":
+			a.pkgs.Render(c, pages.PackagesInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid})
 		case "apps":
 			a.apps.Render(c, pages.AppsInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid})
 		case "settings":
