@@ -142,7 +142,7 @@ func Island(c *ui.Context, in IslandInput) {
 
 func header(c *ui.Context, in IslandInput) {
 	ui.Row(c).Height(in.NotchH).AlignItems(ui.Center).Gap(8).Children(func() {
-		ui.Icon(c, icons.Energy).FontSize(14).TextColor(rose)
+		components.Glyph(c, icons.Energy, 14, rose)
 		ui.Text(c, "Hotwatch").FontSize(12).FontWeight(600).TextColor(ink).SingleLine()
 		ui.Spacer(c) // the notch sits in the middle of this row
 		icon, tip := icons.Pause, "Pause updates"
@@ -160,7 +160,7 @@ func header(c *ui.Context, in IslandInput) {
 
 func iconButton(c *ui.Context, key string, icon *ui.SVG, label string) bool {
 	b := ui.Row(c).Key(key).Size(24, 24).Radius(7).Center().Background(chipBg).Label(label).Tooltip(label)
-	b.Children(func() { ui.Icon(c, icon).FontSize(12).TextColor(inkMuted) })
+	b.Children(func() { components.Glyph(c, icon, 12, inkMuted) })
 	return b.Clicked()
 }
 

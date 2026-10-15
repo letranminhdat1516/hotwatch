@@ -33,3 +33,12 @@ func BundlePath(p string) bool {
 	return len(p) < 1024 && strings.HasPrefix(p, "/") && strings.HasSuffix(p, ".app") &&
 		!strings.Contains(p, "/../") && !strings.Contains(p, "\x00")
 }
+
+// Executable asks for the system's icon of a Unix executable, the one
+// Finder shows for command-line programs: processes without an app bundle
+// (daemons, tools) get it instead of initials.
+const Executable = "public.unix-executable"
+
+// Key reports whether k is something a Source may be asked for: a bundle
+// path (BundlePath) or Executable.
+func Key(k string) bool { return k == Executable || BundlePath(k) }

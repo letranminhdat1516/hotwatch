@@ -23,7 +23,7 @@ func Banner(c *ui.Context, kind BannerKind, text string) ui.Element {
 	}
 	return ui.Row(c).Gap(Grid+2).Padding(Grid+2, 2*Grid).Radius(Grid).
 		Background(col.Alpha(0.10)).Border(1, col.Alpha(0.35)).Children(func() {
-		ui.Icon(c, icon).FontSize(16).TextColor(col)
+		Glyph(c, icon, 16, col)
 		ui.Text(c, text).FontWeight(500)
 	})
 }

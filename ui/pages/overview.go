@@ -73,10 +73,10 @@ func overviewCard(c *ui.Context, cd card, pts []hub.Point, now time.Time) {
 	components.Surface(c, ui.Column(c).Gap(g/2)).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(g).Children(func() {
 			if cd.icon != nil {
-				components.IconTile(c, cd.icon, tint.Alpha(0.14), tint)
+				components.HeaderTile(c, cd.icon, tint.Alpha(0.16), tint)
 			}
 			ui.Text(c, cd.title).FontSize(15).FontWeight(600).TextColor(tint).SingleLine().Grow(1)
-			ui.Icon(c, icons.ChevronRight).FontSize(14).TextColor(t.TextMuted)
+			components.Glyph(c, icons.ChevronRight, 12, t.TextMuted)
 		})
 		if cd.sub != "" {
 			ui.Text(c, cd.sub).FontSize(13).TextColor(t.TextMuted).SingleLine().Margin(g, 0, 0, 0)
@@ -192,7 +192,7 @@ func overviewSectionHeader(c *ui.Context, icon *ui.SVG, title, key string) {
 		tint, tileBg, iconCol = col, col.Alpha(0.14), col
 	}
 	ui.Row(c).AlignItems(ui.Center).Gap(components.Grid).Children(func() {
-		components.IconTile(c, icon, tileBg, iconCol)
+		components.HeaderTile(c, icon, tileBg, iconCol)
 		ui.Text(c, title).FontSize(15).FontWeight(600).TextColor(tint).SingleLine()
 	})
 }

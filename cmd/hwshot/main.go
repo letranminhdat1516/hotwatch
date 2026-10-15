@@ -16,6 +16,7 @@ import (
 	"hotwatch/mac/appicon"
 	"hotwatch/mac/apps"
 	"hotwatch/mac/pkgs"
+	"hotwatch/mac/symbols"
 	"hotwatch/model"
 	"hotwatch/store"
 	hwui "hotwatch/ui"
@@ -155,6 +156,7 @@ func main() {
 	a := hwui.NewApp(func(id string) hub.HostView { return views[id] }, hosts, nil, func(string, string) {})
 	a.SelectForShot(sel, page)
 	a.SetSettings(store.Settings{IntervalMs: 2000})
+	a.SetSymbolSource(symbols.New())
 	if sel == "local" {
 		// Real icons: deliveries run inline, so one warm-up render queues the
 		// loads and a short wait lets AppKit answer before the real render.

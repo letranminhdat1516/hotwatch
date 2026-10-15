@@ -48,3 +48,9 @@ func TestBundlePathRefusesUntrustedPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutableIsAcceptedAsAKey(t *testing.T) {
+	if !Key(Executable) || Key("/etc/passwd") || !Key("/Applications/A.app") {
+		t.Fatal("Key")
+	}
+}

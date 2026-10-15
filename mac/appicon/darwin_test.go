@@ -31,3 +31,18 @@ func TestDarwinLoadsCalculatorIcon(t *testing.T) {
 		t.Fatal("a missing bundle answered at once")
 	}
 }
+
+func TestDarwinServesTheExecutableIcon(t *testing.T) {
+	done := make(chan func(), 4)
+	d := NewDarwin(func(f func()) { done <- f }, 40)
+	d.Icon(Executable)
+	select {
+	case f := <-done:
+		f()
+	case <-time.After(5 * time.Second):
+		t.Fatal("executable icon not delivered")
+	}
+	if bm, ok := d.Icon(Executable); !ok || bm == nil {
+		t.Fatal("no icon for Unix executables")
+	}
+}

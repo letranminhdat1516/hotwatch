@@ -23,12 +23,11 @@ var navigate func(page string)
 // SetNavigate installs how a page link opens another page.
 func SetNavigate(f func(page string)) { navigate = f }
 
-// CPU colours: user time in the CPU colour, kernel time in amber so the
-// two differ in lightness as well as hue; efficiency cores in a lighter
-// blue than performance cores.
+// CPU colours: user time in the CPU blue, kernel time in red; efficiency
+// cores in a lighter blue than performance cores.
 var (
-	cpuSystemHex = "#f59e0b"
-	effCoreHex   = "#38bdf8"
+	cpuSystemHex = "#ff453a"
+	effCoreHex   = "#64d2ff"
 )
 
 // CPU builds the CPU page (UI-DESIGN.md "CPU"): the processor load with
@@ -231,7 +230,7 @@ func topCPUCard(c *ui.Context, v hub.HostView) {
 				}
 				link.Children(func() {
 					ui.Text(c, "Show All").FontSize(13).FontWeight(600).TextColor(t.Accent).SingleLine()
-					ui.Icon(c, icons.ChevronRight).FontSize(12).TextColor(t.Accent)
+					components.Glyph(c, icons.ChevronRight, 11, t.Accent)
 				})
 			}
 		})

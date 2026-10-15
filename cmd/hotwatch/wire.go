@@ -19,6 +19,7 @@ import (
 	"hotwatch/mac/appicon"
 	"hotwatch/mac/apps"
 	"hotwatch/mac/pkgs"
+	"hotwatch/mac/symbols"
 	"hotwatch/model"
 	"hotwatch/source"
 	"hotwatch/source/remote"
@@ -451,6 +452,7 @@ type appUI interface {
 	SetHostPanel(p hwui.HostPanel)
 	SetPost(post func(func()))
 	SetIconSource(src appicon.Source)
+	SetSymbolSource(s symbols.Source)
 	SetApps(scanner apps.Scanner, open func(bundle string))
 	SetPackages(mgr pkgs.Manager)
 	SetLogsOpener(o pages.LogsOpener)
@@ -547,6 +549,7 @@ func (c *core) attach(app appUI, warn store.Warning) {
 	app.SetHostPanel(hostpanel.New(cfg, c.effects()))
 	app.SetPost(c.post)
 	app.SetIconSource(appicon.NewDarwin(c.post, 40))
+	app.SetSymbolSource(symbols.New())
 	app.SetApps(c.apps, c.openBundle)
 	app.SetPackages(c.pkgs)
 	app.SetLogsOpener(c.openLogs)

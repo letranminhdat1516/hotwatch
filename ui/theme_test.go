@@ -23,8 +23,11 @@ func TestThemeTokensMatchTheApprovedDesign(t *testing.T) {
 	if light.Radius != 14 || dark.Radius != 14 {
 		t.Fatalf("card radius %v / %v, want 14", light.Radius, dark.Radius)
 	}
-	want := map[string]string{"cpu": "#6366f1", "memory": "#10b981", "gpu": "#f97316",
-		"disk": "#0ea5e9", "network": "#14b8a6", "energy": "#f59e0b", "battery": "#f59e0b"}
+	// Apple's system colours (dark appearance), as the owner asked on
+	// 2026-10-15: CPU blue, Memory green, GPU pink, Disk orange, Network
+	// teal, Energy yellow, Battery green.
+	want := map[string]string{"cpu": "#0a84ff", "memory": "#30d158", "gpu": "#ff375f",
+		"disk": "#ff9f0a", "network": "#40c8e0", "energy": "#ffd60a", "battery": "#30d158"}
 	for key, hex := range want {
 		got, ok := components.MetricColor(key)
 		if !ok || got != ui.Hex(hex) {

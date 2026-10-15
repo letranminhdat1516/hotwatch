@@ -11,6 +11,7 @@ import (
 	"hotwatch/mac/appicon"
 	"hotwatch/mac/apps"
 	"hotwatch/mac/pkgs"
+	"hotwatch/mac/symbols"
 	"hotwatch/store"
 	"hotwatch/ui/components"
 	"hotwatch/ui/pages"
@@ -181,6 +182,10 @@ func (a *App) SetSettings(s store.Settings) { a.settings = s }
 // SetSettingsHook sets the function called with the new settings when the
 // user changes one; the caller persists and applies them.
 func (a *App) SetSettingsHook(f func(store.Settings)) { a.onSettings = f }
+
+// SetSymbolSource installs where icons get their SF Symbols (main thread);
+// nil draws every icon from Lucide.
+func (a *App) SetSymbolSource(s symbols.Source) { components.SetSymbolSource(s) }
 
 // SetIconSource installs where the pages get application icons (main
 // thread); nil leaves every application on its initials tile.

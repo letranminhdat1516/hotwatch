@@ -46,3 +46,17 @@ var (
 	Laptop       = load("laptop")
 	Activity     = load("activity")
 )
+
+// symbolNames are the SF Symbols the Mac draws in place of each icon (see
+// hotwatch/mac/symbols); an icon without one is always drawn from Lucide.
+var symbolNames = map[*ui.SVG]string{
+	Overview: "square.grid.2x2.fill", CPU: "cpu.fill", Memory: "memorychip.fill", Disk: "internaldrive.fill",
+	Network: "network", GPU: "cube.fill", Energy: "bolt.fill", Processes: "list.bullet", Docker: "shippingbox.fill",
+	Apps: "square.grid.3x3.fill", Packages: "shippingbox", Settings: "gearshape.fill", Host: "server.rack",
+	Offline: "wifi.slash", Warning: "exclamationmark.triangle.fill", ChevronDown: "chevron.down",
+	ChevronRight: "chevron.right", Pause: "pause.fill", Play: "play.fill", Battery: "battery.75percent",
+	Thermometer: "thermometer.medium", Info: "info.circle.fill", Laptop: "laptopcomputer", Activity: "waveform.path.ecg",
+}
+
+// Symbol is the SF Symbol name for icon, "" when it has none.
+func Symbol(icon *ui.SVG) string { return symbolNames[icon] }

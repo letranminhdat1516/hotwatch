@@ -3,6 +3,7 @@
 package notch
 
 import (
+	"runtime"
 	"sync"
 
 	"github.com/ebitengine/purego"
@@ -46,6 +47,10 @@ func (System) Detect() (Geometry, bool) {
 	if appKit() != nil {
 		return Geometry{}, false
 	}
+	// An autorelease pool must be drained on the thread that made it: keep
+	// this goroutine on one OS thread until it is.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	pool := objc.ID(objc.GetClass("NSAutoreleasePool")).Send(selAlloc).Send(selInit)
 	defer pool.Send(selDrain)
 	objc.ID(objc.GetClass("NSApplication")).Send(selSharedApp) // NSScreen needs the app object

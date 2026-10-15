@@ -354,7 +354,7 @@ func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
 				ui.Text(c, cur.Name).FontSize(13).FontWeight(600).SingleLine()
 				ui.Text(c, hostSubtitle(cur, v, now)).FontSize(11).TextColor(t.TextMuted).SingleLine()
 			})
-			ui.Icon(c, icons.ChevronDown).FontSize(14).TextColor(t.TextMuted)
+			components.Glyph(c, icons.ChevronDown, 12, t.TextMuted)
 		})
 	})
 }
@@ -503,6 +503,6 @@ func (a *App) pauseButton(c *ui.Context) {
 		a.togglePause()
 	}
 	b.Children(func() {
-		ui.Icon(c, icon).FontSize(14).TextColor(t.Text)
+		components.Glyph(c, icon, 14, t.Text)
 	})
 }

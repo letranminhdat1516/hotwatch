@@ -19,8 +19,12 @@ func SetIconSource(src appicon.Source) { iconSource = src }
 // of name while the icon loads or when the host has none.
 func appIcon(c *ui.Context, name, bundle string) ui.Element {
 	var bm *ui.Bitmap
-	if iconSource != nil && bundle != "" {
-		bm, _ = iconSource.Icon(bundle)
+	if iconSource != nil {
+		key := bundle
+		if key == "" {
+			key = appicon.Executable // command-line programs: the system's executable icon
+		}
+		bm, _ = iconSource.Icon(key)
 	}
 	return components.AppIcon(c, name, bm)
 }

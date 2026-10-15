@@ -53,7 +53,7 @@ func NewDarwin(post func(func()), px int) *Darwin {
 
 // Icon answers from the cache; a miss schedules a load.
 func (d *Darwin) Icon(bundle string) (*ui.Bitmap, bool) {
-	if !BundlePath(bundle) {
+	if !Key(bundle) {
 		return nil, false
 	}
 	d.mu.Lock()
@@ -132,6 +132,7 @@ func (d *Darwin) touch(bundle string) {
 var (
 	selSharedWorkspace = objc.RegisterName("sharedWorkspace")
 	selIconForFile     = objc.RegisterName("iconForFile:")
+	selIconForFileType = objc.RegisterName("iconForFileType:")
 	selAlloc           = objc.RegisterName("alloc")
 	selInit            = objc.RegisterName("init")
 	selDrain           = objc.RegisterName("drain")
@@ -167,11 +168,20 @@ func load(bundle string, px int) *ui.Bitmap {
 	if appKit() != nil {
 		return nil
 	}
+	// An autorelease pool must be drained on the thread that made it: keep
+	// this goroutine on one OS thread until it is.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	pool := objc.ID(objc.GetClass("NSAutoreleasePool")).Send(selAlloc).Send(selInit)
 	defer pool.Send(selDrain)
 
 	ws := objc.ID(objc.GetClass("NSWorkspace")).Send(selSharedWorkspace)
-	img := ws.Send(selIconForFile, nsString(bundle))
+	var img objc.ID
+	if bundle == Executable {
+		img = ws.Send(selIconForFileType, nsString(Executable))
+	} else {
+		img = ws.Send(selIconForFile, nsString(bundle))
+	}
 	if img == 0 {
 		return nil
 	}
