@@ -169,3 +169,39 @@ func TestShortcutsWorkWhileSearchFocused(t *testing.T) {
 		t.Fatalf("Cmd+2 with search focused: %v", *rec)
 	}
 }
+
+func TestEveryVisiblePageRenders(t *testing.T) {
+	const notBuilt = "This page is not built yet."
+	keys := []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6, ui.Key7, ui.Key8}
+	for name, tc := range map[string]struct {
+		caps   model.Caps
+		titles []string
+	}{
+		"mac": {model.Caps{GPU: true, Battery: true, Processes: true},
+			[]string{"Overview", "CPU", "Memory", "Disk", "Network", "GPU", "Energy", "Processes"}},
+		"vps": {model.Caps{Docker: true, Processes: true},
+			[]string{"Overview", "CPU", "Memory", "Disk", "Network", "Processes", "Docker"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			hosts := []store.Host{{ID: "h", Name: "Host", Kind: "agent"}}
+			v := hub.HostView{Info: model.HostInfo{Caps: tc.caps}, Snap: &model.Snapshot{}}
+			app := hwui.NewApp(func(string) hub.HostView { return v }, hosts, &hub.FakeRunner{}, func(string, string) {})
+			tt := ui.NewTester(app.View, 1400, 900)
+			for i, title := range tc.titles {
+				if i > 0 {
+					tt.Key(ui.Cmd, keys[i])
+				}
+				if n := count(tt, title); n < 2 {
+					t.Errorf("%s: title shown %d times, want top bar and page title: %q", title, n, tt.Texts())
+				}
+				if count(tt, notBuilt) != 0 {
+					t.Errorf("%s: shown as not built yet", title)
+				}
+			}
+			tt.Key(ui.Cmd, ui.KeyComma)
+			if count(tt, notBuilt) != 1 {
+				t.Errorf("settings should still be not built yet: %q", tt.Texts())
+			}
+		})
+	}
+}

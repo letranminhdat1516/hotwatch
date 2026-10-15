@@ -174,6 +174,14 @@ func (a *App) View(c *ui.Context) {
 		switch a.page {
 		case "overview":
 			pages.Overview(c, v, a.now())
+		case "cpu":
+			pages.CPU(c, v, a.now())
+		case "memory":
+			pages.Memory(c, v, a.now())
+		case "disk":
+			pages.Disk(c, v, a.now())
+		case "network":
+			pages.Network(c, v, a.now())
 		case "gpu":
 			pages.GPU(c, v, a.now())
 		case "energy":
