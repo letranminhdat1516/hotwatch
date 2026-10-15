@@ -36,8 +36,8 @@ func TestBarPanelAndHoverZones(t *testing.T) {
 	if p != (Rect{X: 476, Y: 0, W: 560, H: 236}) {
 		t.Fatalf("PanelRect = %+v", p)
 	}
-	entry, stay := HoverZones(n, p)
-	if !entry.Contains(756, 80) || entry.Contains(756, 120) || !entry.Contains(630, 10) || entry.Contains(600, 10) {
+	entry, stay := HoverZones(n, 64, p)
+	if !entry.Contains(756, 20) || entry.Contains(756, 40) || !entry.Contains(600, 10) || entry.Contains(596, 10) {
 		t.Fatalf("entry zone %+v", entry)
 	}
 	if !stay.Contains(470, 250) || stay.Contains(440, 10) {

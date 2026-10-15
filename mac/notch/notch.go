@@ -61,11 +61,11 @@ func PanelRect(n Rect, w, h float64) Rect {
 	return Rect{X: n.X + (n.W-w)/2, Y: n.Y, W: w, H: h}
 }
 
-// HoverZones are where the pointer opens the island (the notch, 40 DIPs
-// wider on each side and 60 deeper) and where it keeps it open (the
-// island, 20 DIPs around).
-func HoverZones(n, panel Rect) (entry, stay Rect) {
-	entry = Rect{X: n.X - 40, Y: n.Y, W: n.W + 80, H: n.H + 60}
+// HoverZones are where the pointer opens the island — on the notch and
+// its ear-wide extensions, nothing around them — and where it keeps it
+// open (the island, 20 DIPs around).
+func HoverZones(n Rect, ear float64, panel Rect) (entry, stay Rect) {
+	entry = Rect{X: n.X - ear, Y: n.Y, W: n.W + 2*ear, H: n.H}
 	return entry, panel.Inset(20, 20)
 }
 

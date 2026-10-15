@@ -25,6 +25,10 @@ type nookApp interface {
 	Paused() bool
 }
 
+// holdToOpen is how long the pointer stays on the notch before the island
+// opens.
+const holdToOpen = 150 * time.Millisecond
+
 // nookCtl runs the nook: it places the bar and the island around the
 // notch, opens the island while the pointer is on it or a host just went
 // offline, and hides both without a notch or while turned off. Main thread.
@@ -34,17 +38,18 @@ type nookCtl struct {
 	island nookWin
 	app    nookApp
 
-	geo     notch.Geometry
-	has     bool // a notch was found
-	off     bool // turned off in Settings
-	motion  nook.Motion
-	shown   bool // the island window is on screen
-	states  map[string]hub.ConnState
-	entry   notch.Rect
-	stay    notch.Rect
-	panel   notch.Rect
-	hover   bool
-	lastNow time.Time
+	geo       notch.Geometry
+	has       bool // a notch was found
+	off       bool // turned off in Settings
+	motion    nook.Motion
+	shown     bool // the island window is on screen
+	states    map[string]hub.ConnState
+	entry     notch.Rect
+	stay      notch.Rect
+	panel     notch.Rect
+	hover     bool
+	lastNow   time.Time
+	enteredAt time.Time // when the pointer came onto the notch; zero while it is off it
 
 	alertHost string // the host whose going offline opened the island
 }
@@ -63,7 +68,7 @@ func (n *nookCtl) relayout() {
 		return
 	}
 	n.panel = notch.PanelRect(n.geo.Notch, nook.PanelW, nook.PanelH)
-	n.entry, n.stay = notch.HoverZones(n.geo.Notch, n.panel)
+	n.entry, n.stay = notch.HoverZones(n.geo.Notch, nook.EarW, n.panel)
 	n.bar.place(notch.Ears(n.geo.Notch, nook.EarW, nook.Shoulder))
 	n.island.place(n.panel)
 	if !n.off {
@@ -100,11 +105,22 @@ func (n *nookCtl) tick(now time.Time, x, y float64) {
 	if !n.has || n.off {
 		return
 	}
-	zone := n.entry
 	if n.motion.Shown() {
-		zone = n.stay
+		n.hover = n.stay.Contains(x, y)
+	} else {
+		// Opening needs the pointer on the notch for holdToOpen: passing
+		// over it on the way to the menu bar does not count.
+		switch in := n.entry.Contains(x, y); {
+		case !in:
+			n.enteredAt = time.Time{}
+		case n.enteredAt.IsZero():
+			n.enteredAt = now
+		}
+		n.hover = !n.enteredAt.IsZero() && now.Sub(n.enteredAt) >= holdToOpen
 	}
-	n.hover = zone.Contains(x, y)
+	if n.hover {
+		n.enteredAt = time.Time{}
+	}
 	n.motion.Update(now, n.hover)
 	switch {
 	case n.motion.Shown() && !n.shown:

@@ -60,11 +60,13 @@ func TestNookOpensOnHoverAndHidesAfterClosing(t *testing.T) {
 	if island.shown {
 		t.Fatal("shown without a pointer")
 	}
-	n.tick(n0.Add(70*time.Millisecond), 757, 20) // on the notch
+	n.tick(n0.Add(70*time.Millisecond), 757, 20)  // on the notch…
+	n.tick(n0.Add(140*time.Millisecond), 757, 20) // …still there after the hold
+	n.tick(n0.Add(230*time.Millisecond), 757, 20)
 	if !island.shown || island.invalid == 0 {
 		t.Fatalf("not shown on hover: %+v", island)
 	}
-	n.tick(n0.Add(600*time.Millisecond), 600, 150) // inside the island, outside the notch zone
+	n.tick(n0.Add(700*time.Millisecond), 600, 150) // inside the island, outside the notch zone
 	if n.motion.Phase() != nook.Open {
 		t.Fatalf("closed while the pointer is on the island: %v", n.motion.Phase())
 	}
@@ -119,5 +121,35 @@ func TestNookTurnedOffHidesEverything(t *testing.T) {
 	n.setOff(false)
 	if !bar.shown {
 		t.Fatal("bar not back after turning on")
+	}
+}
+
+// The island opens only once the pointer is on the black of the notch or
+// its ears, and has stayed there: near it, or passing over it, is not
+// enough.
+func TestNookNeedsThePointerOnTheNotchForAMoment(t *testing.T) {
+	n, _, island := newNook(t)
+	// Just below the notch, and just beside the ears: not on it.
+	for i, pt := range [][2]float64{{757, 40}, {757, 70}, {665 - nook.EarW - 6, 10}, {850 + nook.EarW + 6, 10}} {
+		n.tick(n0.Add(time.Duration(i)*70*time.Millisecond), pt[0], pt[1])
+	}
+	if island.shown {
+		t.Fatal("opened with the pointer near the notch, not on it")
+	}
+	// A pass over the notch, out again within the hold.
+	at := n0.Add(time.Second)
+	n.tick(at, 757, 20)
+	n.tick(at.Add(70*time.Millisecond), 757, 60)
+	n.tick(at.Add(140*time.Millisecond), 757, 60)
+	if island.shown {
+		t.Fatal("opened on a pass over the notch")
+	}
+	// On an ear, held.
+	at = n0.Add(2 * time.Second)
+	for i := 0; i < 4; i++ {
+		n.tick(at.Add(time.Duration(i)*70*time.Millisecond), 665-20, 15)
+	}
+	if !island.shown {
+		t.Fatal("did not open with the pointer held on an ear")
 	}
 }
