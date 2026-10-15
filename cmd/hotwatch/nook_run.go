@@ -20,13 +20,24 @@ const pollEvery = 66 * time.Millisecond
 // display plugged in).
 const relayoutEvery = 3 * time.Second
 
-// mygoWin is a nook window on mygo.
-type mygoWin struct{ w *mygo.Window }
+// mygoWin is a nook window on mygo. at is where it was last placed:
+// showing a window lets AppKit move it below the menu bar, so show puts it
+// back over the notch.
+type mygoWin struct {
+	w  *mygo.Window
+	at *mygo.Rectangle
+}
 
 func (m mygoWin) place(r notch.Rect) {
-	m.w.SetBounds(mygo.Rectangle{X: int(math.Round(r.X)), Y: int(math.Round(r.Y)), Width: int(math.Round(r.W)), Height: int(math.Round(r.H))})
+	*m.at = mygo.Rectangle{X: int(math.Round(r.X)), Y: int(math.Round(r.Y)), Width: int(math.Round(r.W)), Height: int(math.Round(r.H))}
+	m.w.SetBounds(*m.at)
 }
-func (m mygoWin) show()   { m.w.ShowInactive() }
+func (m mygoWin) show() {
+	m.w.ShowInactive()
+	if m.at.Width > 0 {
+		m.w.SetBounds(*m.at)
+	}
+}
 func (m mygoWin) hide()   { m.w.Hide() }
 func (m mygoWin) redraw() { m.w.Invalidate() }
 
@@ -66,7 +77,7 @@ func startNook(c *core, app *hwui.App, main *mygo.Window, off bool) {
 			cx.After(nook.FrameDelay())
 		}
 	}, true)
-	ctl.bar, ctl.island = mygoWin{bar}, mygoWin{island}
+	ctl.bar, ctl.island = mygoWin{bar, &mygo.Rectangle{}}, mygoWin{island, &mygo.Rectangle{}}
 	ctl.off = off
 	ctl.relayout()
 	c.nook = ctl
