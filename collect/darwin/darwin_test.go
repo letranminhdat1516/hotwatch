@@ -34,8 +34,6 @@ func vmStatPages(out []byte, key string) uint64 {
 	return v
 }
 
-func inactive(out []byte) uint64 { return vmStatPages(out, "Pages inactive") * pageSize() }
-
 func diffPct(a, b uint64) float64 {
 	if b == 0 {
 		return 100
@@ -60,20 +58,38 @@ func TestCoresMatchSysctl(t *testing.T) {
 	}
 }
 
-func TestMemoryNearVMStat(t *testing.T) {
+// Activity Monitor's (and Pulse's) memory: App = anonymous − purgeable,
+// Wired, Compressed = the pages the compressor occupies, and In use = their
+// sum; Cached = file-backed + purgeable. vm_stat prints the same kernel
+// counters, so a read taken right after must agree closely.
+func TestMemoryMatchesActivityMonitor(t *testing.T) {
 	s, err := New().Sample(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	out, _ := exec.Command("vm_stat").Output()
-	free := vmStatPages(out, "Pages free") * pageSize()
-	if diffPct(s.Memory.Total-s.Memory.Used, free+inactive(out)) > 5 { // same definition as Activity Monitor's "available"
-		t.Fatalf("memory differs from vm_stat by > 5%%: total %d used %d free %d inactive %d",
-			s.Memory.Total, s.Memory.Used, free, inactive(out))
-	}
+	ps := pageSize()
+	pages := func(k string) uint64 { return vmStatPages(out, k) * ps }
 	m := s.Memory
-	if m.Total == 0 || m.Wired == 0 || m.App == 0 {
-		t.Fatalf("zero field: %+v", m)
+	app := pages("Anonymous pages") - pages("Pages purgeable")
+	for _, c := range []struct {
+		name      string
+		got, want uint64
+	}{
+		{"App", m.App, app},
+		{"Wired", m.Wired, pages("Pages wired down")},
+		{"Compressed", m.Compressed, pages("Pages occupied by compressor")},
+		{"Cached", m.Cached, pages("File-backed pages") + pages("Pages purgeable")},
+	} {
+		if diffPct(c.got, c.want) > 3 {
+			t.Errorf("%s = %d, vm_stat gives %d", c.name, c.got, c.want)
+		}
+	}
+	if m.Used != m.App+m.Wired+m.Compressed {
+		t.Errorf("Used %d ≠ App %d + Wired %d + Compressed %d", m.Used, m.App, m.Wired, m.Compressed)
+	}
+	if m.Total == 0 || m.Wired == 0 || m.App == 0 || m.Used > m.Total {
+		t.Fatalf("bad memory: %+v", m)
 	}
 	switch m.Pressure {
 	case "normal", "warn", "critical":

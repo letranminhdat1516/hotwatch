@@ -11,29 +11,34 @@ import (
 	"hotwatch/model"
 )
 
-// readMemory fills the memory section. Total/Used/Wired/swap come from
-// gopsutil (Used = Total - free - inactive, Activity Monitor's "available");
-// App and Compressed come from sysctl. A failing optional sysctl leaves its
-// field zero rather than failing the section.
+// readMemory fills the memory section the way Activity Monitor counts it,
+// from the kernel's own counters (host_statistics64, as vm_stat prints):
+// App = anonymous − purgeable pages, Wired, Compressed = the pages the
+// compressor occupies, Used ("in use") = App + Wired + Compressed, and
+// Cached = file-backed + purgeable pages (memory macOS frees on demand).
+// Total and swap come from sysctl through gopsutil.
 func readMemory(ctx context.Context) (model.Memory, error) {
 	vm, err := mem.VirtualMemoryWithContext(ctx)
 	if err != nil {
 		return model.Memory{}, err
 	}
-	m := model.Memory{Total: vm.Total, Used: vm.Used, Wired: vm.Wired, Cached: vm.Inactive, Pressure: pressure()}
+	page, err := unix.SysctlUint32("hw.pagesize")
+	if err != nil {
+		return model.Memory{}, err
+	}
+	st, err := hostVMStats()
+	if err != nil {
+		return model.Memory{}, err
+	}
+	pg := func(n uint32) uint64 { return uint64(n) * uint64(page) }
+	m := model.Memory{Total: vm.Total, Wired: pg(st.WireCount), Compressed: pg(st.CompressorPageCount),
+		Cached: pg(st.ExternalPageCount) + pg(st.PurgeableCount), Pressure: pressure()}
+	if st.InternalPageCount >= st.PurgeableCount {
+		m.App = pg(st.InternalPageCount - st.PurgeableCount)
+	}
+	m.Used = min(m.App+m.Wired+m.Compressed, m.Total)
 	if sw, err := mem.SwapMemoryWithContext(ctx); err == nil {
 		m.SwapTotal, m.SwapUsed = sw.Total, sw.Used
-	}
-	page, err := unix.SysctlUint32("hw.pagesize")
-	if err == nil {
-		internal, e1 := unix.SysctlUint32("vm.page_pageable_internal_count")
-		purgeable, e2 := unix.SysctlUint32("vm.page_purgeable_count")
-		if e1 == nil && e2 == nil && internal >= purgeable {
-			m.App = uint64(internal-purgeable) * uint64(page)
-		}
-	}
-	if b, err := unix.SysctlUint64("vm.compressor_bytes_used"); err == nil {
-		m.Compressed = b
 	}
 	return m, nil
 }
