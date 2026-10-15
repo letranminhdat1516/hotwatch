@@ -434,6 +434,7 @@ type hubAPI interface {
 	Retry(hostID string)
 	Select(hostID, page string)
 	SetVisible(hostIDs []string)
+	SetInterval(d time.Duration)
 	Stop()
 }
 
@@ -449,6 +450,8 @@ type appUI interface {
 	SetLogsOpener(o pages.LogsOpener)
 	SetColumnsHook(f func(page string, cols []string))
 	SetSavedColumns(page string, cols []string)
+	SetSettings(s store.Settings)
+	SetSettingsHook(f func(store.Settings))
 	SetFrameHook(f func(start time.Time))
 	SetNotice(text string)
 	AskPassphrase(keyPath string, reply func(pass string, ok bool)) (cancel func())
@@ -498,6 +501,21 @@ func (c *core) interval() time.Duration {
 	return defaultInterval
 }
 
+// setSettings saves a change from the Settings page (the store keeps its
+// own columns) and applies what takes effect at once: the poll interval.
+// Network units are applied by the window itself.
+func (c *core) setSettings(s store.Settings) {
+	cfg := c.cfg.Config()
+	cfg.Settings = s
+	if err := c.cfg.Save(cfg); err != nil {
+		c.log.Warn("settings.save", "err", err)
+		return
+	}
+	if c.hub != nil {
+		c.hub.SetInterval(c.interval())
+	}
+}
+
 // onSelect is the App's selection callback.
 func (c *core) onSelect(host, page string) {
 	c.times.selected()
@@ -518,6 +536,8 @@ func (c *core) attach(app appUI, warn store.Warning) {
 	for page, cols := range cfg.Settings.Columns {
 		app.SetSavedColumns(page, cols)
 	}
+	app.SetSettings(cfg.Settings)
+	app.SetSettingsHook(c.setSettings)
 	app.SetFrameHook(c.times.frame)
 	app.SetRetry(c.retry)
 	if warn != "" {

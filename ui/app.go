@@ -34,6 +34,10 @@ type App struct {
 	docker    *pages.Docker
 	onColumns func(page string, cols []string)
 
+	settings   store.Settings       // shown on the Settings page; NetUnits is applied each frame
+	onSettings func(store.Settings) // SetSettingsHook
+	settingsUI pages.SettingsState  // the page's bound controls, kept between frames
+
 	notice   string                // SetNotice; "" when dismissed
 	onFrame  func(start time.Time) // SetFrameHook
 	prompts  []*passPrompt         // AskPassphrase queue; the first is shown
@@ -148,6 +152,21 @@ func (a *App) SetSavedColumns(page string, cols []string) {
 	}
 }
 
+// SetSettings shows s on the Settings page and applies what the window
+// itself honours (network units). Call it on the main thread.
+func (a *App) SetSettings(s store.Settings) { a.settings = s }
+
+// SetSettingsHook sets the function called with the new settings when the
+// user changes one; the caller persists and applies them.
+func (a *App) SetSettingsHook(f func(store.Settings)) { a.onSettings = f }
+
+func (a *App) changeSettings(s store.Settings) {
+	a.settings = s
+	if a.onSettings != nil {
+		a.onSettings(s)
+	}
+}
+
 // copyView detaches the snapshot and slices from the poller's data.
 // Convention: published views are never mutated in place, so pointer fields
 // (rates, GPU values) and inner slices (Addrs, Assertions) are shared
@@ -247,6 +266,8 @@ func (a *App) View(c *ui.Context) {
 				Width: a.split - 6*components.Grid, Actions: a.acts})
 		case "docker":
 			a.docker.Render(c, pages.DockerInput{HostID: a.selected, View: v, Gen: a.gen, Now: a.now(), Actions: a.acts})
+		case "settings":
+			pages.Settings(c, &a.settingsUI, a.settings, a.changeSettings)
 		default:
 			components.EmptyState(c, "This page is not built yet.")
 		}

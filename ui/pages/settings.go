@@ -1,0 +1,116 @@
+package pages
+
+import (
+	"runtime"
+	"runtime/debug"
+
+	"github.com/egoist/mygo/ui"
+
+	"hotwatch/store"
+)
+
+var (
+	intervalLabels = []string{"0.5 s", "1 s", "2 s", "5 s"}
+	intervalMs     = []int{500, 1000, 2000, 5000}
+	unitLabels     = []string{"Bytes/s", "Bits/s"}
+)
+
+// nearestInterval is the index of the option closest to ms.
+func nearestInterval(ms int) int {
+	best := 0
+	for i, v := range intervalMs {
+		if abs(v-ms) < abs(intervalMs[best]-ms) {
+			best = i
+		}
+	}
+	return best
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// SettingsState is the Settings page's bound widget state. The App keeps
+// one between frames: a segmented control writes its choice to the pointer
+// it was built with, applied before the next frame, so a per-frame local
+// would never see it.
+type SettingsState struct {
+	interval, units int
+	syncedMs        int
+	syncedUnits     string
+	init            bool
+}
+
+// sync points the controls at s when the settings changed elsewhere.
+func (st *SettingsState) sync(s store.Settings) {
+	if st.init && st.syncedMs == s.IntervalMs && st.syncedUnits == s.NetUnits {
+		return
+	}
+	st.interval = nearestInterval(s.IntervalMs)
+	st.units = 0
+	if s.NetUnits == "bits" {
+		st.units = 1
+	}
+	st.syncedMs, st.syncedUnits, st.init = s.IntervalMs, s.NetUnits, true
+}
+
+// Settings builds the Settings page (UI-DESIGN.md, "Settings"): the poll
+// interval, network units, the keyboard shortcuts and the build. set is
+// called with the changed settings when the user picks an option; the
+// caller persists and applies them. Options without an implementation
+// behind them (language, menu bar) are not offered.
+func Settings(c *ui.Context, st *SettingsState, s store.Settings, set func(store.Settings)) {
+	t := c.Theme()
+	st.sync(s)
+	pageColumn(c, func() {
+		section(c, "Updates", func() {
+			ui.Text(c, "Update every").FontSize(12).TextColor(t.TextMuted)
+			ui.Row(c).Children(func() { ui.Segmented(c, &st.interval, intervalLabels...) })
+			if ms := intervalMs[st.interval]; ms != s.IntervalMs && st.interval != nearestInterval(s.IntervalMs) {
+				s.IntervalMs, st.syncedMs = ms, ms
+				set(s)
+				c.Invalidate() // redraw now: the sidebar already drew this frame
+			}
+			note(c, "How often the selected host is polled; the other hosts update every 15 s.")
+		})
+		section(c, "Units", func() {
+			ui.Text(c, "Network speeds in").FontSize(12).TextColor(t.TextMuted)
+			ui.Row(c).Children(func() { ui.Segmented(c, &st.units, unitLabels...) })
+			units := ""
+			if st.units == 1 {
+				units = "bits"
+			}
+			if units != s.NetUnits {
+				s.NetUnits, st.syncedUnits = units, units
+				set(s)
+				c.Invalidate() // redraw now: the sidebar already drew this frame
+			}
+		})
+		section(c, "Keyboard", func() {
+			for _, line := range []string{
+				"⌘1 – ⌘9   switch pages",
+				"⌘,   open Settings",
+				"⌥⌘↑ / ⌥⌘↓   previous / next host",
+				"⌘F   search the processes",
+			} {
+				ui.Text(c, line).FontSize(13)
+			}
+		})
+		section(c, "About", func() {
+			kv(c, "Hotwatch", appVersion())
+			kv(c, "Go", runtime.Version())
+		})
+	})
+}
+
+// appVersion is the main module's version from the build info; "dev" for a
+// build from a working tree.
+func appVersion() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "dev"
+}

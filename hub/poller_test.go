@@ -134,6 +134,29 @@ func TestTiering(t *testing.T) {
 	})
 }
 
+func TestSetIntervalChangesSelectedPeriod(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a := newCounting()
+		h, _ := start(t, 2*time.Second, map[string]source.Source{"a": a})
+		defer h.Stop()
+		h.Select("a", "overview")
+		advance(9 * time.Second) // polls at 0, 2, 4, 6, 8
+		if _, n, _, _ := a.counts(); n != 5 {
+			t.Fatalf("polls at 2 s = %d, want 5", n)
+		}
+		h.SetInterval(time.Second)       // due at 9 (8 + 1 s), then every second
+		advance(3500 * time.Millisecond) // t = 12.5: polls at 9, 10, 11, 12
+		if _, n, _, _ := a.counts(); n != 9 {
+			t.Fatalf("polls after SetInterval(1s) = %d, want 9", n)
+		}
+		h.SetInterval(0)     // ignored
+		advance(time.Second) // t = 13.5: poll at 13
+		if _, n, _, _ := a.counts(); n != 10 {
+			t.Fatalf("polls after SetInterval(0) = %d, want 10", n)
+		}
+	})
+}
+
 func TestPageData(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		a, b := newCounting(), newCounting()

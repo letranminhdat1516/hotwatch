@@ -44,6 +44,7 @@ type Group struct {
 type Settings struct {
 	IntervalMs    int                 `json:"intervalMs"`
 	Language      string              `json:"language"`
+	NetUnits      string              `json:"netUnits,omitempty"` // "bits" for bits per second; empty: bytes
 	Columns       map[string][]string `json:"columns,omitempty"`
 	LaunchAtLogin bool                `json:"launchAtLogin"`
 }

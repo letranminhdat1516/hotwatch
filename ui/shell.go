@@ -86,6 +86,7 @@ func Shell(c *ui.Context, a *App, content func()) {
 	v := a.views[a.selected]
 	now := a.now()
 	components.SetChartWindow(a.Window())
+	format.SetBitRates(a.settings.NetUnits == "bits")
 
 	// a.page is the single source of truth: sidebar rows and shortcuts both
 	// call setPage; a.tab is derived below for anything that still reads it.

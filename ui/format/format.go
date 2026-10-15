@@ -10,46 +10,66 @@ import (
 // Unknown is shown for a value that is not known; never 0.
 const Unknown = "—"
 
-var byteUnits = [...]string{"B", "KB", "MB", "GB", "TB", "PB"}
+// Byte sizes step by 1024; bit rates follow networking's decimal units.
+var (
+	byteUnits = [...]string{"B", "KB", "MB", "GB", "TB", "PB"}
+	bitUnits  = [...]string{"b", "kb", "Mb", "Gb", "Tb", "Pb"}
+)
+
+// bitRates makes Rate print bits per second ("1.2 Mb/s") instead of bytes.
+// The UI sets it from Settings on the main thread, where values are
+// formatted.
+var bitRates bool
+
+// SetBitRates chooses bits per second for Rate.
+func SetBitRates(on bool) { bitRates = on }
+
+// BitRates reports whether Rate prints bits per second.
+func BitRates() bool { return bitRates }
 
 // valid reports whether v is a usable measurement: finite and not negative.
 func valid(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 }
 
 // humanize picks the unit first and moves to the next one when the rounded
-// value would print as 1024. Values beyond the largest unit are unknown.
-func humanize(v float64) string {
+// value would print as a whole base. Values beyond the largest unit are
+// unknown.
+func humanize(v, base float64, units [6]string) string {
 	i := 0
-	for v >= 1024 && i < len(byteUnits)-1 {
-		v /= 1024
+	for v >= base && i < len(units)-1 {
+		v /= base
 		i++
 	}
 	if i == 0 {
-		if math.Round(v) < 1024 {
-			return fmt.Sprintf("%.0f B", v)
+		if math.Round(v) < base {
+			return fmt.Sprintf("%.0f %s", v, units[0])
 		}
-		v /= 1024
+		v /= base
 		i++
 	}
-	if math.Round(v*10)/10 >= 1024 {
-		if i == len(byteUnits)-1 {
+	if math.Round(v*10)/10 >= base {
+		if i == len(units)-1 {
 			return Unknown
 		}
-		v /= 1024
+		v /= base
 		i++
 	}
-	return fmt.Sprintf("%.1f %s", v, byteUnits[i])
+	return fmt.Sprintf("%.1f %s", v, units[i])
 }
 
 // Bytes formats n with a 1024 base: "12.3 GB".
-func Bytes(n uint64) string { return humanize(float64(n)) }
+func Bytes(n uint64) string { return humanize(float64(n), 1024, byteUnits) }
 
-// Rate formats a bytes-per-second rate: "1.2 MB/s". nil, negative and
-// non-finite rates are unknown.
+// Rate formats a bytes-per-second rate: "1.2 MB/s", or "9.6 Mb/s" when
+// SetBitRates is on. nil, negative and non-finite rates are unknown.
 func Rate(bps *float64) string {
 	if bps == nil || !valid(*bps) {
 		return Unknown
 	}
-	if h := humanize(*bps); h != Unknown {
+	h := humanize(*bps, 1024, byteUnits)
+	if bitRates {
+		h = humanize(*bps*8, 1000, bitUnits)
+	}
+	if h != Unknown {
 		return h + "/s"
 	}
 	return Unknown

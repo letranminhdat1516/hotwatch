@@ -96,7 +96,7 @@ func (h *Hub) due(p *host, t tier, force bool, now time.Time) (at time.Time, ok 
 	}
 	period := visibleInterval
 	if t == tierSelected {
-		period = h.interval
+		period = h.pollInterval()
 	}
 	return p.lastPoll.Add(period), true
 }

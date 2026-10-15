@@ -169,6 +169,25 @@ func (h *Hub) SetVisible(hostIDs []string) {
 	h.wakeAll()
 }
 
+// SetInterval changes how often the selected host is polled; pollers
+// recompute their next due time at once. Non-positive values are ignored.
+func (h *Hub) SetInterval(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	h.mu.Lock()
+	h.interval = d
+	h.mu.Unlock()
+	h.wakeAll()
+}
+
+// pollInterval is the selected host's poll period.
+func (h *Hub) pollInterval() time.Duration {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.interval
+}
+
 // Retry moves hostID to Connecting (EvReset) and polls it again.
 func (h *Hub) Retry(hostID string) {
 	h.mu.Lock()

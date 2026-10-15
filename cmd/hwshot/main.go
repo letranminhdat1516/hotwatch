@@ -146,6 +146,7 @@ func main() {
 	views["local"] = lv
 	a := hwui.NewApp(func(id string) hub.HostView { return views[id] }, hosts, nil, func(string, string) {})
 	a.SelectForShot(sel, page)
+	a.SetSettings(store.Settings{IntervalMs: 2000})
 
 	img := mui.Render(a.View, 1440, 900, 2)
 	f, err := os.Create(out)

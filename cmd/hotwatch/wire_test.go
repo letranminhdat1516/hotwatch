@@ -106,6 +106,9 @@ type fakeApp struct {
 	answer    func(keyPath string) (string, bool)
 	withdrawn []string
 	retry     func(string)
+
+	settings     store.Settings
+	settingsHook func(store.Settings)
 }
 
 func newFakeApp() *fakeApp {
@@ -130,6 +133,8 @@ func (a *fakeApp) SetColumnsHook(f func(string, []string))    { a.colHook = f }
 func (a *fakeApp) SetSavedColumns(page string, cols []string) { a.columns[page] = cols }
 func (a *fakeApp) SetFrameHook(f func(time.Time))             { a.frameHook = f }
 func (a *fakeApp) SetNotice(s string)                         { a.notice = s }
+func (a *fakeApp) SetSettings(s store.Settings)               { a.settings = s }
+func (a *fakeApp) SetSettingsHook(f func(store.Settings))     { a.settingsHook = f }
 func (a *fakeApp) AskPassphrase(k string, reply func(string, bool)) func() {
 	a.prompts = append(a.prompts, k)
 	if a.answer != nil {
@@ -179,7 +184,8 @@ func (h *fakeHub) SetVisible(ids []string) {
 	h.visible = slices.Clone(ids)
 	h.mu.Unlock()
 }
-func (h *fakeHub) Stop() { h.rec("stop", "") }
+func (h *fakeHub) Stop()                        { h.rec("stop", "") }
+func (h *fakeHub) SetInterval(d time.Duration) { h.rec("interval", d.String()) }
 func (h *fakeHub) got() []hubCall {
 	h.mu.Lock()
 	defer h.mu.Unlock()

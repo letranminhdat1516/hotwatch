@@ -199,8 +199,8 @@ func TestEveryVisiblePageRenders(t *testing.T) {
 				}
 			}
 			tt.Key(ui.Cmd, ui.KeyComma)
-			if count(tt, notBuilt) != 1 {
-				t.Errorf("settings should still be not built yet: %q", tt.Texts())
+			if count(tt, notBuilt) != 0 || count(tt, "Update every") != 1 {
+				t.Errorf("settings page not rendered: %q", tt.Texts())
 			}
 		})
 	}
