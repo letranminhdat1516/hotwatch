@@ -342,3 +342,34 @@ func TestProcessesReadStaticFactsOncePerProcess(t *testing.T) {
 		t.Fatalf("only %d of %d processes matched between scans", same, len(second))
 	}
 }
+
+func TestProcessesNoticeAnExecUnderTheSamePID(t *testing.T) {
+	// sh replaces itself with sleep: same PID, same start time, new program.
+	cmd := exec.Command("/bin/sh", "-c", "/bin/sleep 0.4; exec /bin/sleep 5")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	c := New().(*collector)
+	find := func() model.Process {
+		ps, err := c.Processes(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range ps {
+			if p.PID == int32(cmd.Process.Pid) {
+				return p
+			}
+		}
+		t.Fatalf("pid %d not listed", cmd.Process.Pid)
+		return model.Process{}
+	}
+	if p := find(); p.Name == "sleep" {
+		t.Fatalf("before exec: %q", p.Name)
+	}
+	time.Sleep(800 * time.Millisecond)
+	p := find()
+	if p.Name != "sleep" || !strings.Contains(p.Command, "sleep 5") {
+		t.Fatalf("after exec the cache still says %q / %q", p.Name, p.Command)
+	}
+}

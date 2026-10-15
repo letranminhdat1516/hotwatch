@@ -13,6 +13,7 @@ import (
 
 	"github.com/ebitengine/purego"
 	gproc "github.com/shirou/gopsutil/v4/process"
+	"golang.org/x/sys/unix"
 
 	"hotwatch/model"
 )
@@ -99,10 +100,15 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 	return out, nil
 }
 
-// procStatic are the facts of a process that do not change while it runs:
-// read once per (PID, start time) and reused by later scans.
+// procStatic are the facts of a process that do not change while it runs
+// the same program: read once and reused by later scans while the PID, the
+// start time, the kernel's command name and the uid stay the same. exec()
+// keeps the PID and start time but changes the command name; a setuid exec
+// changes the uid; either reads the facts again.
 type procStatic struct {
 	name, user, command, appBundle string
+	comm                           string // kinfo_proc p_comm when read
+	uid                            uint32 // kinfo_proc effective uid when read
 }
 
 // staticReads counts full reads of static facts (tests).
@@ -132,21 +138,23 @@ func readStatic(ctx context.Context, gp *gproc.Process) procStatic {
 // readProc reads one process. statics holds the static facts of processes
 // seen before (read-only here); a process not in it is read in full.
 func readProc(ctx context.Context, gp *gproc.Process, now time.Time, statics map[procKey]procStatic) *procResult {
-	ct, err := gp.CreateTimeWithContext(ctx)
-	if err != nil {
+	// One sysctl gives the identity (start time, command name, uid) and the
+	// parent, which changes when it exits (the child moves to launchd).
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", int(gp.Pid))
+	if err != nil || kp.Proc.P_pid != gp.Pid {
 		return nil // exited, or not identifiable: no (PID, StartTime) identity
 	}
+	ct := kp.Proc.P_starttime.Sec*1000 + int64(kp.Proc.P_starttime.Usec)/1000 // as gopsutil's CreateTime
+	comm := cString(kp.Proc.P_comm[:])
+	uid := kp.Eproc.Ucred.Uid
 	key := procKey{gp.Pid, ct}
 	st, ok := statics[key]
-	if !ok {
+	if !ok || st.comm != comm || st.uid != uid {
 		st = readStatic(ctx, gp)
+		st.comm, st.uid = comm, uid
 	}
-	p := model.Process{PID: gp.Pid, StartTime: time.UnixMilli(ct), Name: st.name, User: st.user, Command: st.command, AppBundle: st.appBundle}
-	// The parent changes when it exits (the child moves to launchd): read it
-	// every time.
-	if ppid, err := gp.PpidWithContext(ctx); err == nil {
-		p.PPID = ppid
-	}
+	p := model.Process{PID: gp.Pid, PPID: kp.Eproc.Ppid, StartTime: time.UnixMilli(ct),
+		Name: st.name, User: st.user, Command: st.command, AppBundle: st.appBundle}
 	var cur procPrev
 	cur.at = now
 	if mi, err := gp.MemoryInfoWithContext(ctx); err == nil {
@@ -162,6 +170,16 @@ func readProc(ctx context.Context, gp *gproc.Process, now time.Time, statics map
 		cur.read, cur.write, cur.haveIO = r, w, true
 	}
 	return &procResult{p: p, key: key, prev: cur, static: st}
+}
+
+// cString is a NUL-terminated byte array as a string.
+func cString(b []byte) string {
+	for i, c := range b {
+		if c == 0 {
+			return string(b[:i])
+		}
+	}
+	return string(b)
 }
 
 type procResult struct {
