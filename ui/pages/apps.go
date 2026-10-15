@@ -342,7 +342,6 @@ func (p *Apps) summary() string {
 	return s
 }
 
-
 // inspector shows the chosen application: its icon and name, the actions
 // (open, move to the Trash, show in the Finder), its details and its path.
 func (p *Apps) inspector(c *ui.Context, in AppsInput, a apps.App) {
