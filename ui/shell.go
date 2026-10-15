@@ -117,6 +117,11 @@ func Shell(c *ui.Context, a *App, content func()) {
 					if kind, text, ok := banner(v.Conn, now); ok {
 						ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
 							components.Banner(c, kind, text).Grow(1)
+							if v.Conn.State == hub.HostKeyUnknown && a.panel != nil {
+								if ui.Button(c, "Verify host key…").Clicked() {
+									a.panel.OpenHostKey()
+								}
+							}
 							a.retryButton(c, v.Conn.State)
 						})
 					}
@@ -282,10 +287,33 @@ func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
 					a.selectHost(h.ID)
 					a.hostMenuOpen = false
 				}
+				if a.panel != nil {
+					item.ContextMenu(func(m *ui.Menu) { a.panel.HostMenu(m, h) })
+				}
 				item.Children(func() {
 					ui.Box(c).Size(8, 8).Radius(4).Background(components.StateColor(t, string(a.views[h.ID].Conn.State)))
 					ui.Text(c, h.Name).FontSize(13).SingleLine().Grow(1)
 				})
+			}
+			if a.panel != nil {
+				add := ui.Row(c).Key("hs-add").AlignItems(ui.Center).Gap(components.Grid).
+					Padding(6, components.Grid).Radius(components.Grid)
+				if add.Hovered() {
+					add.Background(t.SurfaceHover)
+				}
+				if add.Clicked() {
+					a.hostMenuOpen = false
+					a.panel.OpenAdd()
+				}
+				add.Children(func() {
+					ui.Text(c, "+").FontSize(13).FontWeight(600).TextColor(t.Accent).Width(8)
+					ui.Text(c, "Add host…").FontSize(13).TextColor(t.Accent).SingleLine().Grow(1)
+				})
+			}
+		}
+		if a.panel != nil {
+			if e := a.panel.Err(); e != "" {
+				ui.Text(c, e).FontSize(11).TextColor(t.Danger).Padding(2, components.Grid)
 			}
 		}
 		btn := ui.Row(c).Key("host-switch").AlignItems(ui.Center).Gap(components.Grid).
@@ -295,6 +323,9 @@ func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
 		}
 		if btn.Clicked() {
 			a.hostMenuOpen = !a.hostMenuOpen
+		}
+		if a.panel != nil {
+			btn.ContextMenu(func(m *ui.Menu) { a.panel.HostMenu(m, cur) })
 		}
 		btn.Children(func() {
 			ui.Box(c).Size(10, 10).Radius(5).Background(components.StateColor(t, string(v.Conn.State)))

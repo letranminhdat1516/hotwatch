@@ -138,6 +138,33 @@ func (p *Panel) Render(c *ui.Context, selected string, view func(id string) hub.
 	}
 }
 
+// RenderDialogs draws the panel's dialogs (add/edit host, group, remove,
+// host-key trust) and applies a pending menu choice, without the host tree:
+// the sidebar's host switcher lists the hosts, this keeps their dialogs
+// working. Call it once per frame after the rest of the window.
+func (p *Panel) RenderDialogs(c *ui.Context, selected string, view func(id string) hub.HostView) {
+	p.form.dialog(c, p)
+	p.group.dialog(c, p)
+	p.removeDialog(c)
+	p.hostKeyDialog(c, selected, view)
+	if f := p.pending; f != nil {
+		p.pending = nil
+		f()
+	}
+}
+
+// OpenAdd opens the add-host form.
+func (p *Panel) OpenAdd() { p.form.openAdd() }
+
+// OpenHostKey reopens the host-key dialog for the selected host.
+func (p *Panel) OpenHostKey() { p.hk.isOpen, p.hk.err = true, "" }
+
+// HostMenu fills m with the actions for h: edit, move to a group, remove.
+func (p *Panel) HostMenu(m *ui.Menu, h store.Host) { p.hostMenu(m, h) }
+
+// Err is the last failed save or token write, "" when none.
+func (p *Panel) Err() string { return p.err }
+
 func (p *Panel) footer(c *ui.Context, selected string, view func(string) hub.HostView) {
 	if p.err == "" && !p.hostKeyNote(c, selected, view, false) {
 		return

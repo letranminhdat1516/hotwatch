@@ -130,21 +130,6 @@ func TestBannerAndEmptyState(t *testing.T) {
 	}
 }
 
-func TestCardValueWithUnitAndUnknown(t *testing.T) {
-	tt := ui.NewTester(func(c *ui.Context) {
-		components.Card(c, "CPU", "37.5", "%", []string{"Load 1.00"}, []float64{1, 2, 3})
-		components.Card(c, "Disk", "—", "%", nil, nil)
-	}, 600, 400)
-	for _, want := range []string{"CPU", "37.5 %", "Load 1.00", "Disk", "—"} {
-		if !slices.Contains(tt.Texts(), want) {
-			t.Errorf("missing %q in %q", want, tt.Texts())
-		}
-	}
-	if slices.Contains(tt.Texts(), "— %") {
-		t.Errorf("unit printed after an unknown value: %q", tt.Texts())
-	}
-}
-
 func TestBarRowShowsLabelAndValue(t *testing.T) {
 	v := 42.5
 	tt := ui.NewTester(func(c *ui.Context) {

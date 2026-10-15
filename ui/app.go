@@ -129,13 +129,20 @@ func copyView(v hub.HostView) hub.HostView {
 	return v
 }
 
-// HostPanel draws the right-hand host panel: selected is the host the pages
-// show and view returns any host's latest view.
+// HostPanel owns host management: the add/edit/remove and host-key dialogs,
+// and the per-host actions menu. The sidebar's host switcher lists the
+// hosts and calls into it; RenderDialogs runs once per frame after the
+// window content. selected is the host the pages show and view returns any
+// host's latest view.
 type HostPanel interface {
-	Render(c *ui.Context, selected string, view func(id string) hub.HostView)
+	RenderDialogs(c *ui.Context, selected string, view func(id string) hub.HostView)
+	OpenAdd()
+	OpenHostKey()
+	HostMenu(m *ui.Menu, h store.Host)
+	Err() string
 }
 
-// SetHostPanel replaces the placeholder host list with p.
+// SetHostPanel installs p; without one the switcher only switches hosts.
 func (a *App) SetHostPanel(p HostPanel) { a.panel = p }
 
 func (a *App) host() (store.Host, bool) {
@@ -202,6 +209,9 @@ func (a *App) View(c *ui.Context) {
 		}
 	})
 	a.passphraseDialog(c)
+	if a.panel != nil {
+		a.panel.RenderDialogs(c, a.selected, func(id string) hub.HostView { return a.views[id] })
+	}
 	if a.onFrame != nil {
 		a.onFrame(start)
 	}
