@@ -16,11 +16,13 @@ var iconSource appicon.Source
 func SetIconSource(src appicon.Source) { iconSource = src }
 
 // appIcon draws the icon tile of the application at bundle, or the initials
-// of name while the icon loads or when the host has none.
+// of name while the icon loads or when the host has none. A helper nested
+// in an app (Google Chrome Helper (Renderer).app inside Google Chrome.app)
+// shows its app's icon: the helper's own is a blank document.
 func appIcon(c *ui.Context, name, bundle string) ui.Element {
 	var bm *ui.Bitmap
 	if iconSource != nil {
-		key := bundle
+		key := outerBundle(bundle)
 		if key == "" {
 			key = appicon.Executable // command-line programs: the system's executable icon
 		}

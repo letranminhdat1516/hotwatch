@@ -32,7 +32,7 @@ import (
 
 const (
 	defaultAgentPort = 7171
-	defaultInterval  = 2 * time.Second
+	defaultInterval  = 1 * time.Second
 	columnsDebounce  = 500 * time.Millisecond
 )
 

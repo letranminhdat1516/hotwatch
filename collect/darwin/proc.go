@@ -5,6 +5,7 @@ package darwin
 import (
 	"context"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -145,6 +146,7 @@ func readStatic(ctx context.Context, gp *gproc.Process) procStatic {
 	} else {
 		st.name = "?"
 	}
+	st.name = programName(st.name, exe)
 	if u, err := gp.UsernameWithContext(ctx); err == nil {
 		st.user = u
 	}
@@ -287,4 +289,26 @@ func leU64(b []byte) uint64 {
 	_ = b[7]
 	return uint64(b[0]) | uint64(b[1])<<8 | uint64(b[2])<<16 | uint64(b[3])<<24 |
 		uint64(b[4])<<32 | uint64(b[5])<<40 | uint64(b[6])<<48 | uint64(b[7])<<56
+}
+
+// versionRe matches a file named after a version, "2.1.296".
+var versionRe = regexp.MustCompile(`^v?\d+(\.\d+)+$`)
+
+// programName is the name to show for a process: its own, unless that is a
+// version number, as for tools that install each version under its own
+// file name (~/.local/share/claude/versions/2.1.296); then the nearest
+// folder above it that names the program ("claude").
+func programName(name, exe string) string {
+	if !versionRe.MatchString(name) || exe == "" {
+		return name
+	}
+	for dir := filepath.Dir(exe); dir != "/" && dir != "."; dir = filepath.Dir(dir) {
+		switch b := filepath.Base(dir); {
+		case b == "versions", b == "bin", versionRe.MatchString(b):
+			continue
+		default:
+			return b
+		}
+	}
+	return name
 }

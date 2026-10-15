@@ -167,3 +167,21 @@ func TestHistoryKeepsStackSeries(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryCountsTunnelTrafficOnce(t *testing.T) {
+	h := NewHistory()
+	rx := func(v float64) *float64 { return &v }
+	sw := 12.4
+	at := time.Unix(100, 0)
+	h.Push(at, model.Snapshot{Net: []model.Interface{
+		{Name: "en0", Up: true, Kind: "wifi", RxBps: rx(5000), TxBps: rx(100)},
+		{Name: "utun8", Up: true, Kind: "vpn", RxBps: rx(4000), TxBps: rx(90)},
+		{Name: "bridge0", Up: true, Kind: "bridge", RxBps: rx(7), TxBps: rx(7)},
+	}, Battery: &model.Battery{ChargePct: 90, SystemW: &sw}})
+	if got := h.Series("net.rx"); len(got) != 1 || got[0].V != 5000 {
+		t.Fatalf("net.rx %v, want the Wi-Fi traffic alone", got)
+	}
+	if got := h.Series("power.system"); len(got) != 1 || got[0].V != 12.4 {
+		t.Fatalf("power.system %v", got)
+	}
+}

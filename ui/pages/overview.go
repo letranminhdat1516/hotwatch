@@ -36,6 +36,7 @@ type card struct {
 	series   string  // hub.History series for the chart; "" for none
 	pctScale bool    // the chart's ceiling is 100
 	layers   []layer // a stacked chart instead of series: front (bottom) first
+	slot     int     // position in the grid: keeps cards of one kind (GPUs) apart
 }
 
 // layer is one series of a card's stacked chart and its colour.
@@ -56,7 +57,8 @@ func Overview(c *ui.Context, v hub.HostView, now time.Time) {
 	g := float32(components.Grid)
 	ui.Column(c).Gap(2 * g).Children(func() {
 		ui.Grid(c).Columns(3).Gap(2 * g).Children(func() {
-			for _, cd := range cards(v, now) {
+			for i, cd := range cards(v, now) {
+				cd.slot = i
 				var pts []hub.Point
 				if cd.series != "" && v.Hist != nil {
 					pts = v.Hist.Series(cd.series)
@@ -79,7 +81,7 @@ func overviewCard(c *ui.Context, cd card, pts []hub.Point, hist *hub.History, no
 		tint = col
 	}
 	g := float32(components.Grid)
-	components.Surface(c, ui.Column(c).Gap(g/2)).Children(func() {
+	linkCard(c, fmt.Sprintf("card-%s-%d", cd.key, cd.slot), cardPage(cd.key), components.Surface(c, ui.Column(c).Gap(g/2))).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(g).Children(func() {
 			if cd.icon != nil {
 				components.HeaderTile(c, cd.icon, tint.Alpha(0.16), tint)
@@ -126,6 +128,27 @@ func overviewCard(c *ui.Context, cd card, pts []hub.Point, hist *hub.History, no
 			}
 		}
 	})
+}
+
+// cardPage is the page a card opens: its own, the battery's is Energy.
+func cardPage(key string) string {
+	if key == "battery" {
+		return "energy"
+	}
+	return key
+}
+
+// linkCard makes card open page when clicked, with a pointer and a hover
+// border; without a navigator it is left as it is.
+func linkCard(c *ui.Context, key, page string, card ui.Element) ui.Element {
+	if navigate == nil || page == "" {
+		return card
+	}
+	card.Key(key).Cursor(ui.CursorPointer).Label(page).OnClick(func() { navigate(page) })
+	if card.Hovered() {
+		card.Border(1, c.Theme().TextMuted.Alpha(0.5))
+	}
+	return card
 }
 
 // stackLayers resolves a card's layers from the history; nil when any
@@ -199,7 +222,7 @@ func memoryByType(c *ui.Context, m model.Memory, os string) {
 			components.Segment{Label: "Free", Value: free, Muted: true})
 	}
 	colors := components.SegColors(t, legend)
-	components.Surface(c, ui.Column(c).Gap(g)).Children(func() {
+	linkCard(c, "card-memtype", "memory", components.Surface(c, ui.Column(c).Gap(g))).Children(func() {
 		overviewSectionHeader(c, icons.Memory, "Memory by Type", "memory")
 		ui.Row(c).Gap(3*g).AlignItems(ui.Center).Margin(g, 0, 0, 0).Children(func() {
 			components.Donut(c, ring, 16*g).Center().Children(func() {
@@ -228,7 +251,7 @@ func memoryByApp(c *ui.Context, apps []app) {
 	for _, a := range apps {
 		sum += a.rss
 	}
-	components.Surface(c, ui.Column(c).Gap(g)).Children(func() {
+	linkCard(c, "card-memapp", "memory", components.Surface(c, ui.Column(c).Gap(g))).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
 			overviewSectionHeader(c, icons.Apps, "Memory by App", "memory")
 			ui.Spacer(c)
@@ -308,7 +331,7 @@ func energyCard(c *ui.Context, apps []powerApp) {
 		sum += a.mw
 	}
 	top := apps[:min(len(apps), 5)]
-	components.Surface(c, ui.Column(c).Gap(g)).Children(func() {
+	linkCard(c, "card-energy", "energy", components.Surface(c, ui.Column(c).Gap(g))).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
 			overviewSectionHeader(c, icons.Energy, "Energy by App", "energy")
 			ui.Spacer(c)

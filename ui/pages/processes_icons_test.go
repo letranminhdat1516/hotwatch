@@ -60,3 +60,17 @@ func TestProcessesRenderFastWith3000RowsAndPendingIcons(t *testing.T) {
 		t.Fatalf("frame took %v", per)
 	}
 }
+
+func TestHelperProcessesShowTheirAppsIcon(t *testing.T) {
+	chrome := "/Applications/Google Chrome.app"
+	ps := []model.Process{proc(1, "Google Chrome Helper (Renderer)", 1)}
+	ps[0].AppBundle = chrome + "/Contents/Frameworks/Google Chrome Framework.framework/Versions/155/Helpers/Google Chrome Helper (Renderer).app"
+	f := &appicon.Fake{Icons: map[string]*ui.Bitmap{chrome: ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 2, 2)))}}
+	pages.SetIconSource(f)
+	defer pages.SetIconSource(nil)
+	e := newEnv(ps)
+	e.tt.Frame()
+	if _, ok := e.tt.Find("Google Chrome Helper (Renderer) icon"); !ok {
+		t.Fatalf("the helper shows no icon: %q", e.tt.Texts())
+	}
+}

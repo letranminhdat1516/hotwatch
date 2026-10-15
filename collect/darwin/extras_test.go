@@ -67,3 +67,16 @@ func TestPageRate(t *testing.T) {
 		t.Fatal("a reset or an empty interval must be unknown")
 	}
 }
+
+func TestProgramNameForVersionedExecutables(t *testing.T) {
+	for _, c := range []struct{ name, exe, want string }{
+		{"2.1.296", "/Users/a/.local/share/claude/versions/2.1.296", "claude"},
+		{"node", "/opt/homebrew/bin/node", "node"},
+		{"1.2", "", "1.2"},
+		{"v20.1.0", "/x/node/v20.1.0", "node"},
+	} {
+		if got := programName(c.name, c.exe); got != c.want {
+			t.Errorf("programName(%q, %q) = %q, want %q", c.name, c.exe, got, c.want)
+		}
+	}
+}

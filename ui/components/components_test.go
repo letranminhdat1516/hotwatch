@@ -184,12 +184,12 @@ func TestStackedDotChartPaintsEachLayerInItsColour(t *testing.T) {
 	tt.Frame()
 	img := tt.Image()
 	// The last column: the bottom half is System, the top half User.
-	x := int(box.X + box.W - 10 - 3)
+	x := int(box.X + box.W - 10 - 4) // the last column's dot centre
 	at := func(y float32) ui.Color {
 		r, g, b, _ := img.At(x, int(y)).RGBA()
 		return ui.RGB(uint8(r>>8), uint8(g>>8), uint8(b>>8))
 	}
-	bottom, top := box.Y+120-10-3, box.Y+10+3
+	bottom, top := box.Y+120-10-4, box.Y+10+4
 	if at(bottom) != system || at(top) != user {
 		t.Fatalf("bottom %v (want system %v), top %v (want user %v)", at(bottom), system, at(top), user)
 	}

@@ -107,7 +107,9 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 	}
 	ifs := make([]model.Interface, 0, len(s.Net))
 	for _, i := range s.Net {
-		if i.Up && i.Name != "lo" && i.Name != "lo0" {
+		// Tunnels carry traffic the physical interface counts too, and
+		// bridges forward it: count each byte once.
+		if i.Up && i.Name != "lo" && i.Name != "lo0" && i.Kind != "vpn" && i.Kind != "bridge" {
 			ifs = append(ifs, i)
 		}
 	}
@@ -144,6 +146,9 @@ func (h *History) Push(t time.Time, s model.Snapshot) {
 		h.add("battery", t, s.Battery.ChargePct)
 		if s.Battery.PowerW != nil {
 			h.add("power", t, *s.Battery.PowerW)
+		}
+		if s.Battery.SystemW != nil {
+			h.add("power.system", t, *s.Battery.SystemW)
 		}
 	}
 }

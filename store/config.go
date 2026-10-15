@@ -70,7 +70,7 @@ func Default() Config {
 		Version:  1,
 		Groups:   []Group{{ID: "g-local", Name: "Local"}},
 		Hosts:    []Host{{ID: "local", Name: "This Mac", Kind: "local", Group: "g-local"}},
-		Settings: Settings{IntervalMs: 2000, Language: "en"},
+		Settings: Settings{IntervalMs: 1000, Language: "en"},
 		UI:       UIState{SelectedHost: "local", Page: "overview", OpenGroups: []string{"g-local"}},
 	}
 }

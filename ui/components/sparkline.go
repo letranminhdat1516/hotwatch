@@ -12,9 +12,9 @@ import (
 // Dot-matrix chart metrics (UI-DESIGN.md "Dot-matrix chart").
 const (
 	dotRows     = 8
-	dotPitch    = 6   // column pitch, DIPs
-	dotSize     = 3.4 // dot diameter, DIPs
-	chartH      = 72  // backdrop height
+	dotPitch    = 7.5 // column pitch, DIPs
+	dotSize     = 4.6 // dot diameter, DIPs
+	chartH      = 84  // backdrop height
 	chartPad    = 10  // backdrop padding around the matrix
 	chartRadius = 10
 )

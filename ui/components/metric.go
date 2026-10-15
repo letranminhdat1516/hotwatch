@@ -41,3 +41,12 @@ func HeaderTile(c *ui.Context, icon *ui.SVG, bg, fg ui.Color) {
 		Glyph(c, icon, 18, fg)
 	})
 }
+
+// InkOn is the text colour that reads on a filled background bg: near
+// black on light colours (yellow, teal), white on the rest.
+func InkOn(bg ui.Color) ui.Color {
+	if 0.299*float64(bg.R)+0.587*float64(bg.G)+0.114*float64(bg.B) > 170 {
+		return ui.Hex("#1c1c1e")
+	}
+	return ui.Hex("#ffffff")
+}

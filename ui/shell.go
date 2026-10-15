@@ -196,9 +196,15 @@ func (a *App) navRow(c *ui.Context, p Page, v hub.HostView) {
 	selected := p.Key == a.page
 	row := ui.Row(c).Key("nav-"+p.Key).AlignItems(ui.Center).Gap(components.Grid+2).
 		Padding(3, components.Grid).Radius(components.Grid)
+	// The selected row takes its metric's colour (the accent for pages
+	// without one), with text that reads on it.
+	pill, ink := t.Accent, t.AccentText
+	if col, ok := components.MetricColor(p.Key); ok {
+		pill, ink = col, components.InkOn(col)
+	}
 	switch {
 	case selected:
-		row.Background(t.Accent)
+		row.Background(pill)
 	case row.Hovered():
 		row.Background(t.SurfaceHover)
 	}
@@ -207,7 +213,7 @@ func (a *App) navRow(c *ui.Context, p Page, v hub.HostView) {
 	}
 	label, value := t.Text, t.TextMuted
 	if selected {
-		label, value = t.AccentText, t.AccentText.Alpha(0.85)
+		label, value = ink, ink.Alpha(0.8)
 	}
 	tileBg := t.SurfaceHover
 	iconCol := t.TextMuted
@@ -215,8 +221,8 @@ func (a *App) navRow(c *ui.Context, p Page, v hub.HostView) {
 		tileBg, iconCol = col, ui.Hex("#ffffff")
 	}
 	if selected {
-		tileBg = t.AccentText.Alpha(0.22)
-		iconCol = t.AccentText
+		tileBg = ink.Alpha(0.18)
+		iconCol = ink
 	}
 	row.Children(func() {
 		components.IconTile(c, p.icon, tileBg, iconCol)

@@ -1,6 +1,7 @@
 package pages_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -65,4 +66,20 @@ func TestOverviewPartialSectionsShowUnknownNotZero(t *testing.T) {
 	tt := render(pages.Overview, view(s, nil, "linux"))
 	has(t, tt, "Now", "Downloading", "—")
 	lacks(t, tt, "1.50", "Memory by App") // no load figures; no processes
+}
+
+func TestOverviewCardsOpenTheirPages(t *testing.T) {
+	var went []string
+	pages.SetNavigate(func(p string) { went = append(went, p) })
+	defer pages.SetNavigate(nil)
+	tt := render(pages.Overview, view(overviewMac(), powerProcs(), "darwin"))
+	for _, label := range []string{"cpu", "memory", "disk", "network", "energy"} {
+		if err := tt.Click(label); err != nil {
+			t.Fatalf("click %s: %v", label, err)
+		}
+	}
+	// The battery card is the first that opens Energy.
+	if !slices.Equal(went, []string{"cpu", "memory", "disk", "network", "energy"}) {
+		t.Fatalf("navigated %v", went)
+	}
 }

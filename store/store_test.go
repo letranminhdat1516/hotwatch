@@ -50,7 +50,7 @@ func TestDefault(t *testing.T) {
 	c := Default()
 	if c.Version != 1 || c.Groups[0] != (Group{ID: "g-local", Name: "Local"}) ||
 		c.Hosts[0].Group != "g-local" || c.Hosts[0].Kind != "local" ||
-		c.Settings.IntervalMs != 2000 || c.Settings.Language != "en" ||
+		c.Settings.IntervalMs != 1000 || c.Settings.Language != "en" ||
 		c.UI.SelectedHost != "local" || c.UI.Page != "overview" || c.UI.OpenGroups[0] != "g-local" {
 		t.Fatalf("Default = %+v", c)
 	}
