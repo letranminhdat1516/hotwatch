@@ -31,7 +31,7 @@ func About(c *ui.Context, v hub.HostView, now time.Time) {
 	s, m := v.Snap, v.Info.Machine
 	pageColumn(c, func() {
 		components.Surface(c, ui.Row(c).Gap(3*g()).AlignItems(ui.Center)).Children(func() {
-			ui.Row(c).Size(9*g(), 9*g()).Radius(2*g()).Center().Background(t.Accent.Alpha(0.14)).Children(func() {
+			ui.Row(c).Size(9*g(), 9*g()).Radius(2 * g()).Center().Background(t.Accent.Alpha(0.14)).Children(func() {
 				ui.Icon(c, icons.Laptop).FontSize(40).TextColor(t.Accent)
 			})
 			ui.Column(c).Gap(g() / 2).Children(func() {

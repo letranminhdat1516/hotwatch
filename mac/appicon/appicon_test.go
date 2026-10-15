@@ -32,3 +32,19 @@ func TestNoneNeverAnswers(t *testing.T) {
 		t.Fatal("None answered")
 	}
 }
+
+func TestBundlePathRefusesUntrustedPaths(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/Applications/Safari.app":           true,
+		"/Users/x/Applications/A.app":        true,
+		"Safari.app":                         false,
+		"/etc/passwd":                        false,
+		"/Applications/../../etc/x.app":      false,
+		"/Applications/A.app/Contents/MacOS": false,
+		"":                                   false,
+	} {
+		if got := BundlePath(p); got != want {
+			t.Errorf("BundlePath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

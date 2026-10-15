@@ -9,6 +9,7 @@ import (
 
 	"hotwatch/hub"
 	"hotwatch/mac/appicon"
+	"hotwatch/mac/apps"
 	"hotwatch/store"
 	"hotwatch/ui/components"
 	"hotwatch/ui/pages"
@@ -33,6 +34,8 @@ type App struct {
 	acts      *pages.Actions
 	procs     *pages.Processes
 	docker    *pages.Docker
+	apps      *pages.Apps
+	post      func(func()) // SetPost: the main-thread hop handed to pages
 	onColumns func(page string, cols []string)
 
 	settings   store.Settings       // shown on the Settings page; NetUnits is applied each frame
@@ -67,7 +70,7 @@ type App struct {
 func NewApp(views func(id string) hub.HostView, hosts []store.Host, actions hub.Runner, onSelect func(hostID, page string)) *App {
 	a := &App{hosts: slices.Clone(hosts), actions: actions, onSelect: onSelect, page: "overview",
 		views: map[string]hub.HostView{}, held: map[string]hub.HostView{}, now: time.Now, windowIdx: 1,
-		acts: pages.NewActions(actions), procs: pages.NewProcesses(), docker: pages.NewDocker()}
+		acts: pages.NewActions(actions), procs: pages.NewProcesses(), docker: pages.NewDocker(), apps: pages.NewApps(nil, nil)}
 	a.procs.OnColumns = func(cols []string) {
 		if a.onColumns != nil {
 			a.onColumns("processes", cols)
@@ -140,7 +143,18 @@ func (a *App) SetLogsOpener(o pages.LogsOpener) { a.docker.SetLogsOpener(o) }
 
 // SetPost sets how the log reader hands work to the main thread, such as
 // win.Update. Without one the work runs on the reader's goroutine.
-func (a *App) SetPost(post func(func())) { a.docker.SetPost(post) }
+func (a *App) SetPost(post func(func())) {
+	a.post = post
+	a.docker.SetPost(post)
+}
+
+// SetApps installs the application scanner behind the Apps page and how
+// "Open" launches a bundle; call it after SetPost. nil leaves the page
+// explaining that apps are listed for this Mac only.
+func (a *App) SetApps(scanner apps.Scanner, open func(bundle string)) {
+	a.apps = pages.NewApps(scanner, a.post)
+	a.apps.Open = open
+}
 
 // SetColumnsHook sets the function called with a page's visible column ids,
 // in order, when the user hides, shows or moves one; the caller persists them.
@@ -273,6 +287,8 @@ func (a *App) View(c *ui.Context) {
 			a.docker.Render(c, pages.DockerInput{HostID: a.selected, View: v, Gen: a.gen, Now: a.now(), Actions: a.acts})
 		case "about":
 			pages.About(c, v, a.now())
+		case "apps":
+			a.apps.Render(c, pages.AppsInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid})
 		case "settings":
 			pages.Settings(c, &a.settingsUI, a.settings, a.changeSettings)
 		default:
@@ -287,4 +303,3 @@ func (a *App) View(c *ui.Context) {
 		a.onFrame(start)
 	}
 }
-

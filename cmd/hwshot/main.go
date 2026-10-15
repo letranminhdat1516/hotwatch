@@ -14,6 +14,7 @@ import (
 
 	"hotwatch/hub"
 	"hotwatch/mac/appicon"
+	"hotwatch/mac/apps"
 	"hotwatch/model"
 	"hotwatch/store"
 	hwui "hotwatch/ui"
@@ -156,6 +157,8 @@ func main() {
 		// Real icons: deliveries run inline, so one warm-up render queues the
 		// loads and a short wait lets AppKit answer before the real render.
 		a.SetIconSource(appicon.NewDarwin(func(f func()) { f() }, 40))
+		a.SetPost(func(f func()) { f() })
+		a.SetApps(apps.New(nil), nil) // the real scan of this Mac, delivered inline
 		mui.Render(a.View, 1440, 900, 1)
 		time.Sleep(1500 * time.Millisecond)
 	}

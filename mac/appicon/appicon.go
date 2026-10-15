@@ -4,7 +4,11 @@
 // tests, a Source that never answers leaves the UI on its initials tiles.
 package appicon
 
-import "github.com/egoist/mygo/ui"
+import (
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+)
 
 // Source answers Icon from a cache: the bitmap and true when it has one,
 // nil and false otherwise. A miss schedules a load whose completion the
@@ -20,3 +24,12 @@ type None struct{}
 
 // Icon never answers.
 func (None) Icon(string) (*ui.Bitmap, bool) { return nil, false }
+
+// BundlePath reports whether p is an application bundle path the source
+// may hand to AppKit: absolute, ending in ".app", without "..", under 1 KB.
+// A process list is untrusted input (a remote agent sends its own), so
+// anything else is refused before it reaches a native API.
+func BundlePath(p string) bool {
+	return len(p) < 1024 && strings.HasPrefix(p, "/") && strings.HasSuffix(p, ".app") &&
+		!strings.Contains(p, "/../") && !strings.Contains(p, "\x00")
+}

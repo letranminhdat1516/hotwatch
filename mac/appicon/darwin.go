@@ -53,6 +53,9 @@ func NewDarwin(post func(func()), px int) *Darwin {
 
 // Icon answers from the cache; a miss schedules a load.
 func (d *Darwin) Icon(bundle string) (*ui.Bitmap, bool) {
+	if !BundlePath(bundle) {
+		return nil, false
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if e, ok := d.icons[bundle]; ok {

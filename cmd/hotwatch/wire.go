@@ -17,6 +17,7 @@ import (
 
 	"hotwatch/hub"
 	"hotwatch/mac/appicon"
+	"hotwatch/mac/apps"
 	"hotwatch/model"
 	"hotwatch/source"
 	"hotwatch/source/remote"
@@ -449,6 +450,7 @@ type appUI interface {
 	SetHostPanel(p hwui.HostPanel)
 	SetPost(post func(func()))
 	SetIconSource(src appicon.Source)
+	SetApps(scanner apps.Scanner, open func(bundle string))
 	SetLogsOpener(o pages.LogsOpener)
 	SetColumnsHook(f func(page string, cols []string))
 	SetSavedColumns(page string, cols []string)
@@ -473,6 +475,7 @@ type core struct {
 	post    func(func())
 	log     *slog.Logger
 	runner  *hub.ActionRunner
+	apps    *apps.Darwin // the Apps page's scanner and the uninstall executor's
 	hub     hubAPI
 	app     appUI
 	done    chan struct{}
@@ -489,7 +492,9 @@ func newCore(cfg store.Config, p paths, secrets store.Secrets, local func() sour
 	}
 	c.env = sourceEnv{Secrets: secrets, Paths: p, Passphrase: c.passphrase, Local: local}
 	exec := hub.SourceExecutor(c.lookup)
-	c.runner = hub.NewRunner(hub.ComposeExecutors(map[hub.ActionKind]hub.Executor{"signal": exec, "container": exec}),
+	c.apps = apps.New(nil)
+	c.runner = hub.NewRunner(hub.ComposeExecutors(map[hub.ActionKind]hub.Executor{"signal": exec, "container": exec,
+		"uninstall": uninstallExecutor(c.apps)}),
 		func(a hub.Action) { post(func() { c.app.ApplyAction(a) }) })
 	return c
 }
@@ -534,6 +539,7 @@ func (c *core) attach(app appUI, warn store.Warning) {
 	app.SetHostPanel(hostpanel.New(cfg, c.effects()))
 	app.SetPost(c.post)
 	app.SetIconSource(appicon.NewDarwin(c.post, 40))
+	app.SetApps(c.apps, c.openBundle)
 	app.SetLogsOpener(c.openLogs)
 	app.SetColumnsHook(c.cfg.SetColumns)
 	for page, cols := range cfg.Settings.Columns {
