@@ -115,11 +115,13 @@ colour. No lines, no gradients.
 
 ## Bugs found by the side-by-side (fix in the same pass)
 
-- GPU utilisation on Apple silicon reads ~5% while the reference shows 57%
-  at the same moment: the IOKit counter chosen (`Device Utilization %` vs
-  `Renderer Utilization %` / `Tiler`) must be checked against
-  `ioreg -r -c IOAccelerator -d 1`; use the renderer/device utilisation the
-  OS reports for the GPU as a whole.
+- GPU utilisation on Apple silicon read ~5% while the reference showed 57%
+  at about the same moment. Checked: we read `Device Utilization %`, and
+  `ioreg -r -c IOAccelerator -d 1` shows it equal to `Renderer Utilization %`
+  (18 = 18 while checking), so the key is right and the gap is sampling:
+  GPU load is spiky, and one 2 s instantaneous read differs from a smoothed
+  figure. Keep the key; the card shows the window average and peak from
+  `hub.History` beside the instantaneous value, as the anatomy table says.
 - Disk total shows 937 GB on a 494 GB Mac: APFS volumes sharing one
   container are summed twice. Group volumes by container (store) and count
   each container once; show the boot container on the card, all on the
