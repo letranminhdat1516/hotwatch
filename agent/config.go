@@ -55,8 +55,9 @@ func ValidDigest(s string) bool { return digestPattern.MatchString(s) }
 
 // LoadConfig reads and validates the config file. It refuses unknown fields
 // (so a plain token cannot be smuggled in), a missing or malformed token
-// digest, and a file readable by group or others (on Windows: by anyone but
-// SYSTEM, Administrators and the file's owner).
+// digest, and a file readable by group or others (on Windows: a file or
+// folder that anyone but SYSTEM, Administrators and the agent's own account
+// may read, change or own).
 func LoadConfig(path string) (FileConfig, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -67,7 +68,7 @@ func LoadConfig(path string) (FileConfig, error) {
 	if err != nil {
 		return FileConfig{}, err
 	}
-	if err := checkPrivate(path, st); err != nil {
+	if err := checkPrivate(f, path, st); err != nil {
 		return FileConfig{}, err
 	}
 	dec := json.NewDecoder(io.LimitReader(f, 64<<10))

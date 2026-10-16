@@ -137,3 +137,20 @@ func TestTokenReloaderKeepsHashOnInvalidReplacement(t *testing.T) {
 		t.Fatal("failures must be logged")
 	}
 }
+
+func TestPrepareConfigDirThenWriteAndLoad(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hotwatch")
+	if err := PrepareConfigDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareConfigDir(dir); err != nil {
+		t.Fatalf("an existing folder: %v", err)
+	}
+	p := filepath.Join(dir, "agent.json")
+	if err := WriteConfig(p, FileConfig{Listen: "127.0.0.1:7171", TokenSHA256: SHA256Hex("x")}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(p); err != nil {
+		t.Fatal(err)
+	}
+}

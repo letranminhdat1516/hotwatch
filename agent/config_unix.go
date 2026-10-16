@@ -11,7 +11,7 @@ import (
 
 func defaultConfigPath() string { return "/etc/hotwatch/agent.json" }
 
-func checkPrivate(path string, st fs.FileInfo) error {
+func checkPrivate(_ *os.File, path string, st fs.FileInfo) error {
 	if st.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("%s is accessible by group or others (mode %04o); it must be 0600", path, st.Mode().Perm())
 	}
@@ -31,3 +31,6 @@ func keepOwner(f *os.File, path string) error {
 	}
 	return nil
 }
+
+// PrepareConfigDir creates the folder that holds the config (0750).
+func PrepareConfigDir(dir string) error { return os.MkdirAll(dir, 0o750) }
