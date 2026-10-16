@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="docs/screenshots/icon.png" width="128" alt="Hotwatch icon">
-</p>
-
-<h1 align="center">Hotwatch</h1>
+<h1 align="center">
+  <img src="docs/screenshots/banner.png" width="600" alt="Hotwatch — system monitor">
+</h1>
 
 <p align="center">
   A small, fast system monitor for your Mac, PC or Linux desktop — and for the servers you look after.
