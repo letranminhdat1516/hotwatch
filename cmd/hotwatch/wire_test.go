@@ -28,6 +28,7 @@ import (
 	"hotwatch/docker"
 	"hotwatch/hub"
 	"hotwatch/internal/sshtest"
+	"hotwatch/internal/testenv"
 	"hotwatch/mac/appicon"
 	"hotwatch/mac/apps"
 	"hotwatch/mac/pkgs"
@@ -238,7 +239,7 @@ func sshHost(id string) store.Host {
 // waitFor polls cond on the loop until it holds.
 func waitFor(t *testing.T, l *loop, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testenv.Budget(5 * time.Second))
 	for {
 		var ok bool
 		l.do(func() { ok = cond() })
@@ -827,13 +828,21 @@ func TestStartHubDoesNotWaitForKeychain(t *testing.T) {
 		t.Fatal("startHub waited for the Keychain")
 	}
 	defer w.shutdown()
+	// Open the gate before shutdown on every path: a failure below must not
+	// leave the edit queue blocked in Get, which shutdown waits for.
+	var openGate sync.Once
+	release := func() { openGate.Do(func() { close(sec.gate) }) }
+	defer release()
 	waitFor(t, l, "local snapshot while the Keychain is blocked", func() bool { return app.views["local"].Snap != nil })
+	// The hub publishes each host's view on its own; on a slow machine h1's
+	// may arrive after the local snapshot.
+	waitFor(t, l, "h1's first view", func() bool { return app.views["h1"].Conn.State != "" })
 	var st hub.ConnState
 	l.do(func() { st = app.views["h1"].Conn.State })
 	if st != hub.Connecting {
 		t.Fatalf("h1 state %q while its token is being read", st)
 	}
-	close(sec.gate)
+	release()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if src, ok := w.lookup("h1"); ok && !isFailing(src) && !isPending(src) {

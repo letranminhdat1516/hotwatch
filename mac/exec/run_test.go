@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"hotwatch/internal/testenv"
 )
 
 func TestSystemTimesOut(t *testing.T) {
@@ -14,13 +16,13 @@ func TestSystemTimesOut(t *testing.T) {
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "killed") {
 		t.Fatalf("err = %v, want a deadline", err)
 	}
-	if d := time.Since(start); d > 400*time.Millisecond {
+	if d := time.Since(start); d > testenv.Budget(400*time.Millisecond) {
 		t.Fatalf("took %v, the timeout is 50 ms", d)
 	}
 }
 
 func TestSystemPassesArgvWithoutAShell(t *testing.T) {
-	out, err := System(time.Second)(context.Background(), "echo", "$HOME", "a b")
+	out, err := System(testenv.Budget(time.Second))(context.Background(), "echo", "$HOME", "a b")
 	if err != nil {
 		t.Fatal(err)
 	}
