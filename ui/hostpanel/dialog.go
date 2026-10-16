@@ -152,7 +152,7 @@ func (f *hostForm) dialog(c *ui.Context, p *Panel) {
 			ui.Form(c, func() {
 				ui.Field(c, "Name", func() { ui.TextInput(c, &f.name).AutoFocus() }).Error(errs.name)
 				if f.local {
-					ui.Text(c, "This Mac is monitored directly; only its name can change.").FontSize(12).TextColor(t.TextMuted)
+					ui.Text(c, "This machine is monitored directly; only its name can change.").FontSize(12).TextColor(t.TextMuted)
 					return
 				}
 				ui.Field(c, "Connection", func() { ui.Segmented(c, &f.conn, "Tailscale / LAN", "SSH tunnel") })

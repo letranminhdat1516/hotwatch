@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -184,5 +185,16 @@ func TestMemSecrets(t *testing.T) {
 	}
 	if err := s.Delete(TokenKey("h")); err != nil {
 		t.Fatalf("delete of missing key should be nil: %v", err)
+	}
+}
+
+func TestLocalHostNamePerOS(t *testing.T) {
+	for goos, want := range map[string]string{"darwin": "This Mac", "windows": "This PC", "linux": "This Computer", "freebsd": "This Computer"} {
+		if got := localHostName(goos); got != want {
+			t.Errorf("%s: %q, want %q", goos, got, want)
+		}
+	}
+	if Default().Hosts[0].Name != localHostName(runtime.GOOS) {
+		t.Fatalf("default host %q", Default().Hosts[0].Name)
 	}
 }

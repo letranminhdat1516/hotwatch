@@ -66,7 +66,9 @@ func Energy(c *ui.Context, v hub.HostView, now time.Time) {
 				energyCard(c, apps)
 			}
 			temperaturesCard(c, s, b)
-			awakeCard(c, b)
+			if v.Info.OS == "darwin" { // sleep assertions are read on macOS only
+				awakeCard(c, b)
+			}
 			if b != nil {
 				powerSourceCard(c, b)
 			}
