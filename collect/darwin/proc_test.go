@@ -3,13 +3,16 @@
 package darwin
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"hotwatch/internal/testenv"
 	"net"
 	"os"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -94,26 +97,41 @@ func TestCapCommand(t *testing.T) {
 	}
 }
 
-func TestProcessesHTTPServer(t *testing.T) {
-	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("no python3")
+// TestHelperListen is the child process of TestProcessesListener: it
+// listens on a free port, prints the port and waits to be killed.
+func TestHelperListen(t *testing.T) {
+	if os.Getenv("HOTWATCH_HELPER_LISTEN") != "1" {
+		t.Skip("helper process")
 	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Println("error", err)
+		os.Exit(1)
+	}
+	fmt.Println(ln.Addr().(*net.TCPAddr).Port)
+	select {}
+}
+
+func TestProcessesListener(t *testing.T) {
 	before := time.Now()
-	cmd := exec.Command("python3", "-m", "http.server", "8765", "--bind", "127.0.0.1")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperListen$", "helper-listen")
+	cmd.Env = append(os.Environ(), "HOTWATCH_HELPER_LISTEN=1")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
-	for i := 0; ; i++ {
-		c, err := net.DialTimeout("tcp", "127.0.0.1:8765", 200*time.Millisecond)
-		if err == nil {
-			c.Close()
-			break
-		}
-		if i > 50 {
-			t.Fatal("server did not start")
-		}
-		time.Sleep(100 * time.Millisecond)
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	// The child prints its port once it listens: no polling, no guessed delay.
+	line, err := bufio.NewReader(out).ReadString('\n')
+	if err != nil {
+		t.Fatalf("helper: %v", err)
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("helper said %q", line)
 	}
 	col := New().(*collector)
 	procs, err := col.Processes(context.Background())
@@ -130,14 +148,14 @@ func TestProcessesHTTPServer(t *testing.T) {
 			}
 			has := false
 			for _, pt := range p.Ports {
-				if pt == (model.Port{Number: 8765, Proto: "tcp"}) {
+				if pt == (model.Port{Number: uint16(port), Proto: "tcp"}) {
 					has = true
 				}
 			}
 			if !has {
-				t.Errorf("ports = %v, want 8765/tcp", p.Ports)
+				t.Errorf("ports = %v, want %d/tcp", p.Ports, port)
 			}
-			if p.PPID != int32(os.Getpid()) || p.RSS == 0 || p.Threads == 0 || !strings.Contains(p.Command, "http.server") {
+			if p.PPID != int32(os.Getpid()) || p.RSS == 0 || p.Threads == 0 || !strings.Contains(p.Command, "helper-listen") {
 				t.Errorf("bad fields: %+v", p)
 			}
 		case 1:
@@ -151,7 +169,7 @@ func TestProcessesHTTPServer(t *testing.T) {
 		}
 	}
 	if !found || !launchd {
-		t.Fatalf("found server=%v launchd=%v among %d", found, launchd, len(procs))
+		t.Fatalf("found listener=%v launchd=%v among %d", found, launchd, len(procs))
 	}
 }
 
