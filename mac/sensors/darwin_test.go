@@ -2,9 +2,14 @@
 
 package sensors
 
-import "testing"
+import (
+	"testing"
+
+	"hotwatch/internal/testenv"
+)
 
 func TestReadThisMacsDieSensors(t *testing.T) {
+	testenv.RequireHardware(t)
 	r, err := Read()
 	if err != nil {
 		t.Fatal(err)

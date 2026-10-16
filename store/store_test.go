@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"hotwatch/internal/testenv"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -133,11 +134,11 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("got %+v %q %v", got, warn, err)
 	}
 	st, _ := os.Stat(p)
-	if st.Mode().Perm() != 0o600 {
+	if testenv.UnixModes() && st.Mode().Perm() != 0o600 {
 		t.Fatalf("file mode %v", st.Mode())
 	}
 	ds, _ := os.Stat(filepath.Dir(p))
-	if ds.Mode().Perm() != 0o700 {
+	if testenv.UnixModes() && ds.Mode().Perm() != 0o700 {
 		t.Fatalf("dir mode %v", ds.Mode())
 	}
 	entries, _ := os.ReadDir(filepath.Dir(p))

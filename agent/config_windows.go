@@ -21,12 +21,13 @@ func defaultConfigPath() string {
 	return filepath.Join(dir, "Hotwatch", "agent.json")
 }
 
-// privateDACL grants full control to SYSTEM, Administrators and the owner,
-// and nothing to anyone else; P stops entries inherited from the folder.
-// privateDirDACL is the same for the folder, inherited by what it holds.
+// privateDACL grants full control to SYSTEM and Administrators and nothing
+// to anyone else; P stops entries inherited from the folder. privateDirDACL
+// is the same for the folder, inherited by what it holds. (An OWNER RIGHTS
+// entry would be pointless: Windows stores it as inherit-only.)
 const (
-	privateDACL    = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)"
-	privateDirDACL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)"
+	privateDACL    = "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+	privateDirDACL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 )
 
 // restrictFile replaces f's access list with privateDACL, the Windows

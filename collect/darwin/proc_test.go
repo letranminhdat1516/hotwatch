@@ -5,6 +5,7 @@ package darwin
 import (
 	"context"
 	"errors"
+	"hotwatch/internal/testenv"
 	"net"
 	"os"
 	"os/exec"
@@ -391,6 +392,7 @@ func TestOwnProcessHasAFootprint(t *testing.T) {
 }
 
 func TestBusyProcessHasPower(t *testing.T) {
+	testenv.RequireHardware(t)
 	c := New().(*collector)
 	ctx := context.Background()
 	if _, err := c.Processes(ctx); err != nil {

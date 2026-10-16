@@ -3,6 +3,7 @@ package agent
 import (
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -14,7 +15,7 @@ func assertPrivate(t *testing.T, p string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := sd.String(); got != privateDACL {
+	if got := aces(sd.String()); got != aces(privateDACL) {
 		t.Fatalf("access list %s, want %s", got, privateDACL)
 	}
 	if _, err := LoadConfig(p); err != nil {
@@ -86,7 +87,7 @@ func TestPrepareConfigDirIsPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := sd.String(); got != privateDirDACL {
+	if got := aces(sd.String()); got != aces(privateDirDACL) {
 		t.Fatalf("folder access list %s, want %s", got, privateDirDACL)
 	}
 }
@@ -103,4 +104,13 @@ func TestConfigRefusesJunctionFolder(t *testing.T) {
 	if _, err := LoadConfig(filepath.Join(link, "agent.json")); err == nil {
 		t.Fatal("a config reached through a junction must be rejected")
 	}
+}
+
+// aces is an SDDL access list without its flags ("D:PAI(...)" → "(...)"):
+// Windows adds AI (auto-inherited) when it stores a protected list.
+func aces(sddl string) string {
+	if i := strings.IndexByte(sddl, '('); i >= 0 {
+		return sddl[i:]
+	}
+	return sddl
 }

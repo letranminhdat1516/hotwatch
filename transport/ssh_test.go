@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"errors"
+	"hotwatch/internal/testenv"
 	"net"
 	"os"
 	"path/filepath"
@@ -62,10 +63,10 @@ func TestUnknownThenTrustedHostKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := os.Stat(cfg.AppKnownHosts)
-	if err != nil || st.Mode().Perm() != 0o600 {
+	if err != nil || (testenv.UnixModes() && st.Mode().Perm() != 0o600) {
 		t.Fatalf("app known_hosts stat %v err %v", st, err)
 	}
-	if st, _ := os.Stat(filepath.Dir(cfg.AppKnownHosts)); st.Mode().Perm() != 0o700 {
+	if st, _ := os.Stat(filepath.Dir(cfg.AppKnownHosts)); testenv.UnixModes() && st.Mode().Perm() != 0o700 {
 		t.Fatalf("dir mode %v", st.Mode().Perm())
 	}
 	d2 := NewSSH(cfg)
@@ -367,10 +368,10 @@ func TestTrustEnforcesModesAndRefusesSymlink(t *testing.T) {
 	if err := TrustHostKey(app, "h.example", 22, key, fp); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := os.Stat(app); st.Mode().Perm() != 0o600 {
+	if st, _ := os.Stat(app); testenv.UnixModes() && st.Mode().Perm() != 0o600 {
 		t.Fatalf("file mode %v", st.Mode().Perm())
 	}
-	if st, _ := os.Stat(sub); st.Mode().Perm() != 0o700 {
+	if st, _ := os.Stat(sub); testenv.UnixModes() && st.Mode().Perm() != 0o700 {
 		t.Fatalf("dir mode %v", st.Mode().Perm())
 	}
 	target := filepath.Join(dir, "victim")
@@ -664,7 +665,7 @@ func TestTrustRefusesSymlinkedParentDir(t *testing.T) {
 	if err := TrustHostKey(filepath.Join(link, "kh"), "h.example", 22, key, ssh.FingerprintSHA256(key)); err == nil {
 		t.Fatal("wrote through symlinked dir")
 	}
-	if st, _ := os.Stat(real); st.Mode().Perm() != 0o755 {
+	if st, _ := os.Stat(real); testenv.UnixModes() && st.Mode().Perm() != 0o755 {
 		t.Fatalf("target dir chmodded: %v", st.Mode().Perm())
 	}
 }

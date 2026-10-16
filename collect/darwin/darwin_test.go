@@ -4,6 +4,7 @@ package darwin
 
 import (
 	"context"
+	"hotwatch/internal/testenv"
 	"math"
 	"os"
 	"os/exec"
@@ -265,6 +266,7 @@ func TestVolumeIORatesFollowWrites(t *testing.T) {
 }
 
 func TestSampleReportsCPUTemperature(t *testing.T) {
+	testenv.RequireHardware(t)
 	s, err := New().Sample(context.Background())
 	if err != nil {
 		t.Fatal(err)

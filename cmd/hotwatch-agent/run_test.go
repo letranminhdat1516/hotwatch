@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"hotwatch/internal/testenv"
 )
 
 func TestHTTPServerLimits(t *testing.T) {
@@ -29,7 +31,7 @@ func TestOpenAuditAppendsWith0640AndFailsLoudly(t *testing.T) {
 	}
 	b, _ := os.ReadFile(p)
 	st, _ := os.Stat(p)
-	if string(b) != "x\nx\n" || st.Mode().Perm()&0o027 != 0 {
+	if string(b) != "x\nx\n" || (testenv.UnixModes() && st.Mode().Perm()&0o027 != 0) {
 		t.Fatalf("content %q mode %v", b, st.Mode())
 	}
 	if _, err := openAudit(filepath.Join(t.TempDir(), "missing", "audit.log")); err == nil {

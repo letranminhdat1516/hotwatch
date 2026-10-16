@@ -4,6 +4,7 @@ package power
 
 import (
 	"context"
+	"hotwatch/internal/testenv"
 	"hotwatch/model"
 	"math"
 	"os/exec"
@@ -32,6 +33,7 @@ func pmsetCharge(t *testing.T) float64 {
 }
 
 func TestReadBatteryMatchesPmset(t *testing.T) {
+	testenv.RequireHardware(t)
 	b, err := Read(context.Background())
 	if err != nil {
 		t.Fatalf("Read: %v", err)
