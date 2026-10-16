@@ -21,4 +21,4 @@ app dmg:         # signed dist/darwin-arm64/Hotwatch.app and its .dmg (mygo.json
 app-windows-linux: # dist/windows-amd64/Hotwatch.exe and dist/linux-amd64/ (.deb, .tar.gz)
 	$(GO) tool mygo build -platform windows/amd64,windows/arm64,linux/amd64,linux/arm64
 icon:            # redraw resources/icon.png
-	$(GO) run ./tools/iconart -logo art/logo-cicca.png resources/icon.png
+	$(GO) run ./tools/iconart resources/icon.png
