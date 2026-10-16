@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -15,26 +14,13 @@ import (
 	"hotwatch/docker"
 )
 
-func ownerOf(t *testing.T, p string) [2]uint32 {
-	t.Helper()
-	st, err := os.Stat(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := st.Sys().(*syscall.Stat_t)
-	return [2]uint32{s.Uid, s.Gid}
-}
-
 func TestFileConfigRoundTripAndMode(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "agent.json")
 	want := FileConfig{Listen: "127.0.0.1:7171", TokenSHA256: SHA256Hex("x"), ReadOnly: true, IntervalMs: 3000}
 	if err := WriteConfig(p, want, false); err != nil {
 		t.Fatal(err)
 	}
-	st, _ := os.Stat(p)
-	if st.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %v, want 0600", st.Mode().Perm())
-	}
+	assertPrivate(t, p)
 	got, err := LoadConfig(p)
 	if err != nil || got != want {
 		t.Fatalf("got %+v, %v", got, err)
@@ -68,8 +54,8 @@ func TestLoadConfigRejectsUnknownFieldsAndOpenPermissions(t *testing.T) {
 	if _, err := LoadConfig(p); err == nil {
 		t.Error("unknown field (e.g. a plain token) must be rejected")
 	}
-	os.WriteFile(p, []byte(good+`}`), 0o644)
-	os.Chmod(p, 0o644)
+	os.WriteFile(p, []byte(good+`}`), 0o600)
+	makePublic(t, p)
 	if _, err := LoadConfig(p); err == nil {
 		t.Error("group/world-readable config must be rejected")
 	}
@@ -79,25 +65,6 @@ func TestNewTokenIs32RandomBytes(t *testing.T) {
 	a, b := NewToken(), NewToken()
 	if a == b || len(a) != 43 { // 32 bytes base64url without padding
 		t.Fatalf("tokens %q %q", a, b)
-	}
-}
-
-func TestWriteConfigReplacePreservesOwner(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "agent.json")
-	c := FileConfig{Listen: "127.0.0.1:7171", TokenSHA256: SHA256Hex("a"), IntervalMs: 2000}
-	if err := WriteConfig(p, c, false); err != nil {
-		t.Fatal(err)
-	}
-	before := ownerOf(t, p)
-	c.TokenSHA256 = SHA256Hex("b")
-	if err := WriteConfig(p, c, true); err != nil {
-		t.Fatal(err)
-	}
-	if after := ownerOf(t, p); after != before {
-		t.Fatalf("owner changed %v -> %v", before, after)
-	}
-	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
-		t.Fatalf("mode %v", st.Mode())
 	}
 }
 

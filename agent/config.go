@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
-	"syscall"
 	"time"
 )
 
-// DefaultConfigPath is where `hotwatch-agent init` writes and `run` reads.
-const DefaultConfigPath = "/etc/hotwatch/agent.json"
+// DefaultConfigPath is where `hotwatch-agent init` writes and `run` reads:
+// /etc/hotwatch/agent.json, or %ProgramData%\Hotwatch\agent.json on Windows.
+var DefaultConfigPath = defaultConfigPath()
 
 // DefaultIntervalMs is the sampling interval written by init.
 const DefaultIntervalMs = 2000
@@ -55,7 +55,8 @@ func ValidDigest(s string) bool { return digestPattern.MatchString(s) }
 
 // LoadConfig reads and validates the config file. It refuses unknown fields
 // (so a plain token cannot be smuggled in), a missing or malformed token
-// digest, and a file readable by group or others.
+// digest, and a file readable by group or others (on Windows: by anyone but
+// SYSTEM, Administrators and the file's owner).
 func LoadConfig(path string) (FileConfig, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -66,8 +67,8 @@ func LoadConfig(path string) (FileConfig, error) {
 	if err != nil {
 		return FileConfig{}, err
 	}
-	if st.Mode().Perm()&0o077 != 0 {
-		return FileConfig{}, fmt.Errorf("%s is accessible by group or others (mode %04o); it must be 0600", path, st.Mode().Perm())
+	if err := checkPrivate(path, st); err != nil {
+		return FileConfig{}, err
 	}
 	dec := json.NewDecoder(io.LimitReader(f, 64<<10))
 	dec.DisallowUnknownFields()
@@ -103,20 +104,16 @@ func WriteConfig(path string, cfg FileConfig, replace bool) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := restrictFile(tmp); err != nil {
 		tmp.Close()
 		return err
 	}
 	if replace {
 		// Keep the owner of the file being replaced (the service user must
 		// still be able to read it after a root-run rotation).
-		if st, err := os.Stat(path); err == nil {
-			if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-				if err := tmp.Chown(int(sys.Uid), int(sys.Gid)); err != nil {
-					tmp.Close()
-					return fmt.Errorf("keeping owner of %s: %w", path, err)
-				}
-			}
+		if err := keepOwner(tmp, path); err != nil {
+			tmp.Close()
+			return fmt.Errorf("keeping owner of %s: %w", path, err)
 		}
 	}
 	if _, err := io.Copy(tmp, bytes.NewReader(data)); err != nil {

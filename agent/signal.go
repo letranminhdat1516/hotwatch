@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,9 @@ type signaller struct {
 	// pin, if set, opens a stable handle (pidfd) before the final start-time
 	// check; errors other than ESRCH fall back to kill.
 	pin func(pid int) (pinned, error)
+	// protect, if set, refuses processes the OS cannot lose (Windows'
+	// csrss, lsass…: ending one stops the machine).
+	protect func(model.Process) bool
 }
 
 // NewSignaller returns a Signaller that signals with kill(2)-style kill after
@@ -41,7 +45,19 @@ func NewSignaller(lookup func(ctx context.Context, pid int32) (model.Process, bo
 // elsewhere, or when pidfd is unsupported, it falls back to kill(2) with the
 // small documented race.
 func NewSystemSignaller(lookup func(ctx context.Context, pid int32) (model.Process, bool, error)) Signaller {
-	return &signaller{lookup: lookup, kill: func(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }, pin: openPin}
+	return &signaller{lookup: lookup, kill: systemKill, pin: openPin, protect: systemProtect}
+}
+
+// windowsCritical reports the Windows processes whose end stops or reboots
+// the machine; names compare without case.
+func windowsCritical(p model.Process) bool {
+	switch strings.ToLower(p.Name) {
+	case "system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe",
+		"services.exe", "lsass.exe", "lsaiso.exe", "memory compression", "secure system",
+		"system idle process":
+		return true
+	}
+	return false
 }
 
 // check verifies pid exists and still has the start time the caller saw.
@@ -60,6 +76,9 @@ func (s *signaller) check(ctx context.Context, pid int32, start time.Time) error
 	}
 	if !p.StartTime.Equal(start) {
 		return &model.APIError{Code: "conflict", Message: "process start time differs; the PID was reused"}
+	}
+	if s.protect != nil && s.protect(p) {
+		return &model.APIError{Code: "forbidden", Message: "refusing to end a process the system depends on"}
 	}
 	return nil
 }
@@ -105,7 +124,7 @@ func mapSignalErr(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, syscall.EPERM):
+	case errors.Is(err, syscall.EPERM), errors.Is(err, fs.ErrPermission):
 		return &model.APIError{Code: "forbidden", Message: "not permitted (process owned by another user)"}
 	case errors.Is(err, syscall.ESRCH):
 		return &model.APIError{Code: "not_found", Message: "no such process"}

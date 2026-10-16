@@ -175,3 +175,31 @@ func TestLookupNotExistIsNotFound(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestSignalRefusesCriticalWindowsProcesses(t *testing.T) {
+	col := &collect.Fake{Procs: []model.Process{
+		{PID: 612, StartTime: time.Unix(100, 0), Name: "lsass.exe"},
+		{PID: 700, StartTime: time.Unix(100, 0), Name: "CSRSS.EXE"},
+		{PID: 900, StartTime: time.Unix(100, 0), Name: "notepad.exe"},
+	}}
+	var killed []int
+	s := &signaller{lookup: fakeLookup(col), protect: windowsCritical,
+		kill: func(pid int, _ syscall.Signal) error { killed = append(killed, pid); return nil }}
+	for _, pid := range []int32{612, 700} {
+		if err := s.Signal(bg, pid, time.Unix(100, 0), model.SigKill); errCode(err) != "forbidden" {
+			t.Fatalf("pid %d: err=%v", pid, err)
+		}
+	}
+	if err := s.Signal(bg, 900, time.Unix(100, 0), model.SigTerm); err != nil {
+		t.Fatal(err)
+	}
+	if len(killed) != 1 || killed[0] != 900 {
+		t.Fatalf("killed=%v", killed)
+	}
+}
+
+func TestSignalMapsPermissionErrors(t *testing.T) {
+	if errCode(mapSignalErr(fs.ErrPermission)) != "forbidden" {
+		t.Fatal("fs.ErrPermission must map to forbidden (Windows ERROR_ACCESS_DENIED)")
+	}
+}
