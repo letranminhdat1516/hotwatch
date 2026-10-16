@@ -128,11 +128,11 @@ func (p *Processes) inspector(c *ui.Context, in ProcessesInput, pr *model.Proces
 		})
 		ui.Text(c, "COMMAND").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g/2, 0, 0, 0)
 		ui.Column(c).Padding(10, 12).Radius(10).Background(t.SurfaceHover).Children(func() {
-			ui.Text(c, command).FontSize(12).Font("Menlo").Selectable()
+			ui.Text(c, command).FontSize(12).Font("monospace").Selectable()
 		})
 		if pr.AppBundle != "" {
 			ui.Text(c, "PATH").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g/2, 0, 0, 0)
-			ui.Text(c, pr.AppBundle).FontSize(12).Font("Menlo").TextColor(t.TextMuted).Selectable()
+			ui.Text(c, pr.AppBundle).FontSize(12).Font("monospace").TextColor(t.TextMuted).Selectable()
 		}
 	})
 }

@@ -36,6 +36,8 @@ func (d *deps) build() *Local {
 		Battery:   func(context.Context) (*model.Battery, error) { return d.bat, d.batErr },
 		Hostname:  func() (string, error) { return "mac", nil },
 		Arch:      "arm64",
+		OS:        "darwin",
+		MacApps:   true,
 		Kernel:    func() (string, error) { return "25.3.0", nil },
 		StartTime: func(_ context.Context, pid int32) (time.Time, error) {
 			if st, ok := d.starts[pid]; ok {
@@ -72,6 +74,17 @@ func TestInfo(t *testing.T) {
 	info, _ = d2.build().Info(context.Background())
 	if info.Caps.GPU || info.Caps.Battery || info.Caps.Docker {
 		t.Fatalf("caps = %+v", info.Caps)
+	}
+}
+
+func TestInfoOffMac(t *testing.T) {
+	l := NewWith(Deps{Collector: &collect.Fake{}, OS: "windows", Arch: "amd64"})
+	info, err := l.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.OS != "windows" || info.Caps.Apps || info.Caps.Packages || !info.Caps.Processes {
+		t.Fatalf("info = %+v (no Mac apps or packages off macOS)", info)
 	}
 }
 
@@ -125,7 +138,7 @@ func TestDockerNotMonitored(t *testing.T) {
 	check := func(err error) {
 		t.Helper()
 		var ae *model.APIError
-		if !errors.As(err, &ae) || ae.Code != "not_found" || ae.Message != "Docker is not monitored on this Mac" {
+		if !errors.As(err, &ae) || ae.Code != "not_found" || ae.Message != "Docker is not monitored on this machine" {
 			t.Fatalf("err = %v", err)
 		}
 	}

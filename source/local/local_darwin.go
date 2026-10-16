@@ -27,6 +27,8 @@ func New() *Local {
 		GPUs:      apple.Read,
 		Battery:   power.Read,
 		Hostname:  os.Hostname,
+		OS:        "darwin",
+		MacApps:   true,
 		Machine:   darwin.Machine,
 		Arch:      runtime.GOARCH,
 		Kernel:    func() (string, error) { return unix.Sysctl("kern.osrelease") },

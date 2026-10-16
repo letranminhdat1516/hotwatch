@@ -2,6 +2,7 @@ package portable
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync"
 	"syscall"
@@ -178,4 +179,22 @@ func readListeners(ctx context.Context) (map[int32][]model.Port, error) {
 		out[c.Pid] = append(out[c.Pid], model.Port{Number: uint16(c.Laddr.Port), Proto: proto})
 	}
 	return out, nil
+}
+
+// Lookup reads one process's identity (start time, as Processes reports it,
+// and name) without touching a collector's state; ok is false when no
+// process has that PID.
+func Lookup(ctx context.Context, pid int32) (model.Process, bool, error) {
+	gp, err := gproc.NewProcessWithContext(ctx, pid)
+	if err != nil {
+		if errors.Is(err, gproc.ErrorProcessNotRunning) {
+			return model.Process{}, false, nil
+		}
+		return model.Process{}, false, err
+	}
+	p, ok := readProc(ctx, gp, nil)
+	if !ok {
+		return model.Process{}, false, nil
+	}
+	return model.Process{PID: pid, StartTime: time.UnixMilli(p.Create), Name: p.Name}, true, nil
 }

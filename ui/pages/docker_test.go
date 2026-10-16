@@ -509,9 +509,9 @@ func TestDockerEmptyStates(t *testing.T) {
 	if pos(e.tt, "Docker not available on this host") < 0 {
 		t.Fatalf("texts %q", e.tt.Texts())
 	}
-	e.view.CtrsErr = &model.APIError{Code: "not_found", Message: "Docker is not monitored on this Mac"}
+	e.view.CtrsErr = &model.APIError{Code: "not_found", Message: "Docker is not monitored on this machine"}
 	e.refresh()
-	if pos(e.tt, "Docker is not monitored on this Mac") < 0 || pos(e.tt, "Docker not available on this host") >= 0 {
+	if pos(e.tt, "Docker is not monitored on this machine") < 0 || pos(e.tt, "Docker not available on this host") >= 0 {
 		t.Fatalf("texts %q", e.tt.Texts())
 	}
 }

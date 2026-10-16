@@ -532,7 +532,7 @@ func (p *Apps) inspector(c *ui.Context, in AppsInput, a apps.App) {
 			kvRow(c, "State", state)
 		})
 		ui.Text(c, "PATH").FontSize(12).FontWeight(650).TextColor(t.TextMuted).Margin(g(), 0, 0, 0)
-		ui.Text(c, a.Bundle).FontSize(13).Font("Menlo").TextColor(t.TextMuted).Selectable()
+		ui.Text(c, a.Bundle).FontSize(13).Font("monospace").TextColor(t.TextMuted).Selectable()
 		if act, ok := in.Actions.LastOn(in.HostID, "uninstall", a.Bundle); ok {
 			col := t.TextMuted
 			if act.State == "failed" {
