@@ -4,8 +4,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
+
+	"hotwatch/internal/testenv"
 )
 
 func TestHTTPServerLimits(t *testing.T) {
@@ -28,7 +31,7 @@ func TestOpenAuditAppendsWith0640AndFailsLoudly(t *testing.T) {
 	}
 	b, _ := os.ReadFile(p)
 	st, _ := os.Stat(p)
-	if string(b) != "x\nx\n" || st.Mode().Perm()&0o027 != 0 {
+	if string(b) != "x\nx\n" || (testenv.UnixModes() && st.Mode().Perm()&0o027 != 0) {
 		t.Fatalf("content %q mode %v", b, st.Mode())
 	}
 	if _, err := openAudit(filepath.Join(t.TempDir(), "missing", "audit.log")); err == nil {
@@ -39,7 +42,7 @@ func TestOpenAuditAppendsWith0640AndFailsLoudly(t *testing.T) {
 func TestDockerProbeCachesFor30s(t *testing.T) {
 	now := time.Unix(1000, 0)
 	calls, up := 0, true
-	p := &dockerProbe{socket: "s", now: func() time.Time { return now }, dial: func(string) bool { calls++; return up }}
+	p := &dockerProbe{now: func() time.Time { return now }, dial: func() bool { calls++; return up }}
 	if !p.Reachable() || !p.Reachable() || calls != 1 {
 		t.Fatalf("calls = %d", calls)
 	}
@@ -55,9 +58,9 @@ func TestDockerProbeCachesFor30s(t *testing.T) {
 }
 
 func TestHostInfoCaps(t *testing.T) {
-	p := &dockerProbe{now: time.Now, dial: func(string) bool { return true }}
+	p := &dockerProbe{now: time.Now, dial: func() bool { return true }}
 	hi := hostInfo(p, func() bool { return true })()
-	if hi.OS != "linux" || hi.CPUCount < 1 || hi.Hostname == "" || !hi.Caps.Docker || !hi.Caps.GPU || !hi.Caps.Processes {
+	if hi.OS != runtime.GOOS || hi.CPUCount < 1 || hi.Hostname == "" || !hi.Caps.Docker || !hi.Caps.GPU || !hi.Caps.Processes {
 		t.Fatalf("%+v", hi)
 	}
 }

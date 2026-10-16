@@ -33,9 +33,9 @@ func main() {
 	if err != nil {
 		fatal("load config", err)
 	}
-	secrets, err := newSecrets()
+	secrets, err := newSecrets(p)
 	if err != nil {
-		fatal("keychain", err)
+		fatal("secret store", err)
 	}
 
 	mygo.App.SetName("Hotwatch")
@@ -46,9 +46,11 @@ func main() {
 		app := hwui.NewApp(func(string) hub.HostView { return hub.HostView{} }, cfg.Hosts, c.runner, c.onSelect)
 		c.attach(app, warn)
 		// The sidebar draws under the window controls (ui.Context.TitleBar).
-		win = mygo.NewWindow(mygo.WindowOptions{Title: "Hotwatch", Width: 1280, Height: 800, MinWidth: 900, MinHeight: 560,
-			TitleBarStyle: mygo.TitleBarHiddenInset, TrafficLightPosition: &mygo.Point{X: 14, Y: 14},
-			Content: ui.View(app.View)})
+		opts := mygo.WindowOptions{Title: "Hotwatch", Width: 1280, Height: 800, MinWidth: 900, MinHeight: 560,
+			Content: ui.View(app.View)}
+		windowChrome(&opts)
+		win = mygo.NewWindow(opts)
+		closeBehavior(win)
 		startNook(c, app, win, cfg.Settings.NookOff)
 		c.startHub()
 	})

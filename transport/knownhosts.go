@@ -17,7 +17,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
-	"golang.org/x/sys/unix"
 )
 
 // hostKeyChecker verifies server host keys against a set of known_hosts files.
@@ -264,7 +263,10 @@ func TrustHostKey(appKnownHosts, host string, port int, key ssh.PublicKey, appro
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(appKnownHosts, os.O_RDWR|os.O_APPEND|os.O_CREATE|unix.O_NOFOLLOW, 0o600)
+	if st, err := os.Lstat(appKnownHosts); err == nil && st.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("trust host key: %s is a symlink", appKnownHosts)
+	}
+	f, err := os.OpenFile(appKnownHosts, os.O_RDWR|os.O_APPEND|os.O_CREATE|oNoFollow, 0o600)
 	if err != nil {
 		return err
 	}

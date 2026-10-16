@@ -1,4 +1,4 @@
-// Package local is the source.Source for the Mac the app runs on. All calls
+// Package local is the source.Source for the machine the app runs on. All calls
 // into the (not concurrency-safe) collectors are serialised by one mutex.
 package local
 
@@ -22,6 +22,8 @@ type Deps struct {
 	GPUs      func(ctx context.Context) ([]model.GPU, error)    // nil: no GPU source
 	Battery   func(ctx context.Context) (*model.Battery, error) // nil: no battery source
 	Hostname  func() (string, error)
+	OS        string // runtime.GOOS
+	MacApps   bool   // the Apps and Packages pages (macOS)
 	Arch      string
 	Kernel    func() (string, error)
 	Machine   func() model.Machine // nil: nothing for the About page
@@ -66,7 +68,7 @@ func (l *Local) Info(ctx context.Context) (model.HostInfo, error) {
 	info := model.HostInfo{
 		ProtocolVersion: model.ProtocolVersion,
 		AgentVersion:    "local",
-		OS:              "darwin",
+		OS:              l.d.OS,
 		Arch:            l.d.Arch,
 		CPUCount:        runtime.NumCPU(),
 	}
@@ -82,7 +84,7 @@ func (l *Local) Info(ctx context.Context) (model.HostInfo, error) {
 	}
 	gpus, _ := l.gpus(ctx)
 	bat, _ := l.battery(ctx)
-	info.Caps = model.Caps{GPU: len(gpus) > 0, Battery: bat != nil, Processes: true, Apps: true, Packages: true}
+	info.Caps = model.Caps{GPU: len(gpus) > 0, Battery: bat != nil, Processes: true, Apps: l.d.MacApps, Packages: l.d.MacApps}
 	return info, ctx.Err()
 }
 
@@ -153,7 +155,7 @@ func (l *Local) Signal(ctx context.Context, pid int32, start time.Time, sig mode
 	}
 }
 
-var errNoDocker = &model.APIError{Code: "not_found", Message: "Docker is not monitored on this Mac"}
+var errNoDocker = &model.APIError{Code: "not_found", Message: "Docker is not monitored on this machine"}
 
 func (l *Local) Containers(context.Context) ([]model.Container, error) { return nil, errNoDocker }
 

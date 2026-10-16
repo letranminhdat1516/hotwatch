@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Signal is a process signal the agent accepts.
 type Signal string
@@ -50,4 +53,15 @@ func (p *Process) Mem() uint64 {
 		return p.Footprint
 	}
 	return p.RSS
+}
+
+// WindowsCritical reports the Windows processes whose end stops or reboots
+// the machine (csrss, lsass…); names compare without case.
+func WindowsCritical(name string) bool {
+	switch strings.ToLower(name) {
+	case "system", "system idle process", "registry", "smss.exe", "csrss.exe", "wininit.exe",
+		"winlogon.exe", "services.exe", "lsass.exe", "lsaiso.exe", "memory compression", "secure system":
+		return true
+	}
+	return false
 }

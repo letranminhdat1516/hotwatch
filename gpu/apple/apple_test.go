@@ -4,10 +4,12 @@ package apple
 
 import (
 	"context"
+	"hotwatch/internal/testenv"
 	"testing"
 )
 
 func TestReadAppleGPU(t *testing.T) {
+	testenv.RequireHardware(t)
 	gpus, err := Read(context.Background())
 	if err != nil {
 		t.Fatalf("Read: %v", err)

@@ -146,7 +146,7 @@ func (d *Docker) Render(c *ui.Context, in DockerInput) {
 	d.sync(in)
 	v := in.View
 	if isNotFound(v.CtrsErr) {
-		components.EmptyState(c, "Docker is not monitored on this Mac")
+		components.EmptyState(c, "Docker is not monitored on this machine")
 		return
 	}
 	if !v.Info.Caps.Docker {

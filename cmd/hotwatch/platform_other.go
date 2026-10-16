@@ -3,17 +3,21 @@
 package main
 
 import (
-	"errors"
+	"github.com/egoist/mygo"
 
 	"hotwatch/source"
-	"hotwatch/store"
+	"hotwatch/source/local"
 )
 
-// The app runs on macOS only; elsewhere it builds but has no local host or
-// Keychain.
+// Off macOS the local host is read by the Linux or portable collector; the
+// nook, Apps and Packages stay macOS features.
 
-var errNotMac = errors.New("hotwatch runs on macOS")
+func newLocalSource() source.Source { return local.New() }
 
-func newLocalSource() source.Source { return failing{errNotMac} }
+// windowChrome keeps the system's title bar: its buttons sit at the right
+// on Windows and many Linux desktops, over where the page header draws.
+func windowChrome(*mygo.WindowOptions) {}
 
-func newSecrets() (store.Secrets, error) { return nil, errNotMac }
+// closeBehavior keeps the default: closing the only window quits the app,
+// as Windows and Linux users expect (there is no Dock to bring it back).
+func closeBehavior(*mygo.Window) {}

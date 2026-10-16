@@ -2,8 +2,10 @@ package store
 
 import (
 	"encoding/json"
+	"hotwatch/internal/testenv"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -132,11 +134,11 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("got %+v %q %v", got, warn, err)
 	}
 	st, _ := os.Stat(p)
-	if st.Mode().Perm() != 0o600 {
+	if testenv.UnixModes() && st.Mode().Perm() != 0o600 {
 		t.Fatalf("file mode %v", st.Mode())
 	}
 	ds, _ := os.Stat(filepath.Dir(p))
-	if ds.Mode().Perm() != 0o700 {
+	if testenv.UnixModes() && ds.Mode().Perm() != 0o700 {
 		t.Fatalf("dir mode %v", ds.Mode())
 	}
 	entries, _ := os.ReadDir(filepath.Dir(p))
@@ -184,5 +186,16 @@ func TestMemSecrets(t *testing.T) {
 	}
 	if err := s.Delete(TokenKey("h")); err != nil {
 		t.Fatalf("delete of missing key should be nil: %v", err)
+	}
+}
+
+func TestLocalHostNamePerOS(t *testing.T) {
+	for goos, want := range map[string]string{"darwin": "This Mac", "windows": "This PC", "linux": "This Computer", "freebsd": "This Computer"} {
+		if got := localHostName(goos); got != want {
+			t.Errorf("%s: %q, want %q", goos, got, want)
+		}
+	}
+	if Default().Hosts[0].Name != localHostName(runtime.GOOS) {
+		t.Fatalf("default host %q", Default().Hosts[0].Name)
 	}
 }

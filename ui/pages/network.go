@@ -209,7 +209,7 @@ func interfaceCard(c *ui.Context, it model.Interface, title string) {
 		icon, key = icons.Shield, "cpu" // VPNs in blue, as the reference shows them
 	}
 	right := func() {
-		ui.Text(c, it.Name).FontSize(13).Font("Menlo").TextColor(t.TextMuted).SingleLine()
+		ui.Text(c, it.Name).FontSize(13).Font("monospace").TextColor(t.TextMuted).SingleLine()
 	}
 	pageCard(c, icon, title, key, right, func() {
 		val, unit := splitUnit(format.Rate(it.RxBps))

@@ -167,7 +167,7 @@ func cmdInit(args []string, stdout, stderr io.Writer, tsIP func() (string, error
 	if _, err := os.Stat(*path); err == nil && !*rotate {
 		return fmt.Errorf("%s already exists; use --rotate to replace it with a new token", *path)
 	}
-	if err := os.MkdirAll(filepath.Dir(*path), 0o750); err != nil {
+	if err := agent.PrepareConfigDir(filepath.Dir(*path)); err != nil {
 		return err
 	}
 	token := agent.NewToken()

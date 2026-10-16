@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -253,7 +254,32 @@ func waitFor(t *testing.T, l *loop, what string, cond func() bool) {
 
 // --- paths and sources -------------------------------------------------------
 
+func TestAppDirPerOS(t *testing.T) {
+	env := map[string]string{"APPDATA": `C:\Users\me\AppData\Roaming`, "XDG_CONFIG_HOME": "/home/me/.cfg"}
+	getenv := func(k string) string { return env[k] }
+	for _, c := range []struct{ goos, home, want string }{
+		{"darwin", "/Users/me", "/Users/me/Library/Application Support/Hotwatch"},
+		{"windows", `C:\Users\me`, `C:\Users\me\AppData\Roaming\Hotwatch`},
+		{"linux", "/home/me", "/home/me/.cfg/hotwatch"},
+		{"freebsd", "/home/me", "/home/me/.cfg/hotwatch"},
+	} {
+		if got := appDirFor(c.goos, c.home, getenv); got != c.want {
+			t.Errorf("%s: %q, want %q", c.goos, got, c.want)
+		}
+	}
+	none := func(string) string { return "" }
+	if got := appDirFor("linux", "/home/me", none); got != "/home/me/.config/hotwatch" {
+		t.Errorf("linux without XDG_CONFIG_HOME: %q", got)
+	}
+	if got := appDirFor("windows", `C:\Users\me`, none); got != `C:\Users\me\AppData\Roaming\Hotwatch` {
+		t.Errorf("windows without APPDATA: %q", got)
+	}
+}
+
 func TestAppPaths(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS layout")
+	}
 	p := appPaths("/Users/me")
 	want := paths{Home: "/Users/me",
 		Config:         "/Users/me/Library/Application Support/Hotwatch/config.json",

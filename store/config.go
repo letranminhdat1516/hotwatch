@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -66,12 +67,23 @@ type Config struct {
 	UI       UIState  `json:"ui"`
 }
 
-// Default is the first-run configuration: this Mac in group "Local".
+// localHostName is the first-run name of the machine the app runs on.
+func localHostName(goos string) string {
+	switch goos {
+	case "darwin":
+		return "This Mac"
+	case "windows":
+		return "This PC"
+	}
+	return "This Computer"
+}
+
+// Default is the first-run configuration: this machine in group "Local".
 func Default() Config {
 	return Config{
 		Version:  1,
 		Groups:   []Group{{ID: "g-local", Name: "Local"}},
-		Hosts:    []Host{{ID: "local", Name: "This Mac", Kind: "local", Group: "g-local"}},
+		Hosts:    []Host{{ID: "local", Name: localHostName(runtime.GOOS), Kind: "local", Group: "g-local"}},
 		Settings: Settings{IntervalMs: 1000, Language: "en"},
 		UI:       UIState{SelectedHost: "local", Page: "overview", OpenGroups: []string{"g-local"}},
 	}

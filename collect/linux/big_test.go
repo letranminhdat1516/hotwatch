@@ -3,6 +3,7 @@ package linux
 import (
 	"encoding/json"
 	"fmt"
+	"hotwatch/internal/testenv"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -113,8 +114,8 @@ func TestProcesses3000Budget(t *testing.T) {
 	}
 	slices.Sort(runs)
 	t.Logf("median %v of %v; JSON %d bytes", runs[2], runs, last)
-	if runs[2] >= 50*time.Millisecond {
-		t.Errorf("median scan %v >= 50ms", runs[2])
+	if budget := testenv.Budget(50 * time.Millisecond); runs[2] >= budget {
+		t.Errorf("median scan %v >= %v", runs[2], budget)
 	}
 	if last >= 8<<20 {
 		t.Errorf("JSON %d bytes >= 8 MB", last)

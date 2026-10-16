@@ -8,7 +8,10 @@ import (
 	"log/slog"
 	"maps"
 	"net"
+	"os"
+	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -45,9 +48,29 @@ type paths struct {
 }
 
 func appPaths(home string) paths {
-	dir := filepath.Join(home, "Library", "Application Support", "Hotwatch")
+	dir := appDirFor(runtime.GOOS, home, os.Getenv)
 	return paths{Home: home, Config: filepath.Join(dir, "config.json"),
 		AppKnownHosts: filepath.Join(dir, "known_hosts"), UserKnownHosts: filepath.Join(home, ".ssh", "known_hosts")}
+}
+
+// appDirFor is the app's data folder on goos: Application Support on
+// macOS, %APPDATA% on Windows, $XDG_CONFIG_HOME (or ~/.config) elsewhere.
+func appDirFor(goos, home string, getenv func(string) string) string {
+	switch goos {
+	case "darwin":
+		return path.Join(home, "Library", "Application Support", "Hotwatch")
+	case "windows":
+		base := getenv("APPDATA")
+		if base == "" {
+			base = strings.TrimRight(home, `\`) + `\AppData\Roaming`
+		}
+		return strings.TrimRight(base, `\`) + `\Hotwatch`
+	}
+	base := getenv("XDG_CONFIG_HOME")
+	if !path.IsAbs(base) { // unset, or relative: the spec says ignore it
+		base = path.Join(home, ".config")
+	}
+	return path.Join(base, "hotwatch")
 }
 
 // sourceEnv is what building a host's source needs besides the host.

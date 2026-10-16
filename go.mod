@@ -3,6 +3,7 @@ module hotwatch
 go 1.27.1
 
 require (
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/ebitengine/purego v0.11.1
 	github.com/egoist/mygo v0.4.8
 	github.com/shirou/gopsutil/v4 v4.26.9

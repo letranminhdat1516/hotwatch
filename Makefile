@@ -1,7 +1,7 @@
 export CGO_ENABLED=0
 GO ?= go
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-.PHONY: build test test-darwin agent run app dmg icon
+.PHONY: build test test-darwin agent run app dmg app-windows-linux icon
 build:
 	$(GO) build ./...
 test:            # Linux + portable packages (run on agent-box)
@@ -11,9 +11,14 @@ test-darwin:     # macOS-only packages (run on the Mac)
 agent:
 	GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-linux-amd64 ./cmd/hotwatch-agent
 	GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-linux-arm64 ./cmd/hotwatch-agent
+	GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-windows-amd64.exe ./cmd/hotwatch-agent
+	GOOS=windows GOARCH=arm64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-windows-arm64.exe ./cmd/hotwatch-agent
+	GOOS=freebsd GOARCH=amd64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-freebsd-amd64 ./cmd/hotwatch-agent
 run:
 	$(GO) run ./cmd/hotwatch
 app dmg:         # signed dist/darwin-arm64/Hotwatch.app and its .dmg (mygo.json)
 	$(GO) tool mygo build
+app-windows-linux: # dist/windows-amd64/Hotwatch.exe and dist/linux-amd64/ (.deb, .tar.gz)
+	$(GO) tool mygo build -platform windows/amd64,windows/arm64,linux/amd64,linux/arm64
 icon:            # redraw resources/icon.png
 	$(GO) run ./tools/iconart -logo art/logo-cicca.png resources/icon.png
