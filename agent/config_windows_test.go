@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -87,5 +88,19 @@ func TestPrepareConfigDirIsPrivate(t *testing.T) {
 	}
 	if got := sd.String(); got != privateDirDACL {
 		t.Fatalf("folder access list %s, want %s", got, privateDirDACL)
+	}
+}
+
+func TestConfigRefusesJunctionFolder(t *testing.T) {
+	_, p := writeGood(t)
+	link := filepath.Join(t.TempDir(), "Hotwatch")
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, filepath.Dir(p)).CombinedOutput(); err != nil {
+		t.Fatalf("mklink: %v %s", err, out)
+	}
+	if err := PrepareConfigDir(link); err == nil {
+		t.Fatal("a junction must not be accepted as the config folder")
+	}
+	if _, err := LoadConfig(filepath.Join(link, "agent.json")); err == nil {
+		t.Fatal("a config reached through a junction must be rejected")
 	}
 }

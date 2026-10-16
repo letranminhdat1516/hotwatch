@@ -1,11 +1,11 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,21 +14,23 @@ import (
 
 const dockerRecheck = 30 * time.Second
 
-// dockerProbe reports whether the Docker socket accepts connections, caching
-// the answer for dockerRecheck.
+// dockerProbe reports whether the Docker daemon accepts connections,
+// caching the answer for dockerRecheck.
 type dockerProbe struct {
-	socket string
-	now    func() time.Time
-	dial   func(socket string) bool
+	now  func() time.Time
+	dial func() bool
 
 	mu   sync.Mutex
 	at   time.Time
 	last bool
 }
 
-func newDockerProbe(socket string) *dockerProbe {
-	return &dockerProbe{socket: socket, now: time.Now, dial: func(s string) bool {
-		c, err := net.DialTimeout("unix", s, time.Second)
+// newDockerProbe probes with dial, which opens one connection to the daemon.
+func newDockerProbe(dial func(ctx context.Context) (net.Conn, error)) *dockerProbe {
+	return &dockerProbe{now: time.Now, dial: func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		c, err := dial(ctx)
 		if err != nil {
 			return false
 		}
@@ -43,7 +45,7 @@ func (p *dockerProbe) Reachable() bool {
 	if !p.at.IsZero() && p.now().Sub(p.at) < dockerRecheck {
 		return p.last
 	}
-	p.last, p.at = p.dial(p.socket), p.now()
+	p.last, p.at = p.dial(), p.now()
 	return p.last
 }
 
@@ -56,13 +58,10 @@ func hasNvidiaSMI() bool {
 // by the server.
 func hostInfo(docker *dockerProbe, gpu func() bool) func() model.HostInfo {
 	host, _ := os.Hostname()
-	kernel := ""
-	if b, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
-		kernel = strings.TrimSpace(string(b))
-	}
+	kernel := kernelVersion()
 	return func() model.HostInfo {
 		return model.HostInfo{
-			AgentVersion: version, Hostname: host, OS: "linux", Arch: runtime.GOARCH,
+			AgentVersion: version, Hostname: host, OS: runtime.GOOS, Arch: runtime.GOARCH,
 			Kernel: kernel, CPUCount: runtime.NumCPU(),
 			Caps: model.Caps{Docker: docker.Reachable(), GPU: gpu(), Processes: true},
 		}

@@ -11,6 +11,9 @@ test-darwin:     # macOS-only packages (run on the Mac)
 agent:
 	GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-linux-amd64 ./cmd/hotwatch-agent
 	GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-linux-arm64 ./cmd/hotwatch-agent
+	GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-windows-amd64.exe ./cmd/hotwatch-agent
+	GOOS=windows GOARCH=arm64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-windows-arm64.exe ./cmd/hotwatch-agent
+	GOOS=freebsd GOARCH=amd64 $(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o dist/hotwatch-agent-freebsd-amd64 ./cmd/hotwatch-agent
 run:
 	$(GO) run ./cmd/hotwatch
 app dmg:         # signed dist/darwin-arm64/Hotwatch.app and its .dmg (mygo.json)

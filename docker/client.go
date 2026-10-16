@@ -48,10 +48,16 @@ type cpuSample struct{ total, system uint64 }
 // concurrent use, but overlapping calls share and overwrite one baseline, so
 // callers should poll from a single goroutine.
 func NewClient(socket string) Engine {
+	return NewClientDial(func(ctx context.Context) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	})
+}
+
+// NewClientDial is NewClient over the connections dial opens: the daemon's
+// named pipe on Windows.
+func NewClientDial(dial func(ctx context.Context) (net.Conn, error)) Engine {
 	return &client{prev: map[string]cpuSample{}, http: &http.Client{Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-		},
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) { return dial(ctx) },
 	}}}
 }
 

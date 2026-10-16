@@ -1,7 +1,9 @@
-// Command hotwatch-agent serves the hotwatch /v1 API for one Linux host.
+// Command hotwatch-agent serves the hotwatch /v1 API for one host: Linux,
+// Windows (desktop or Server, as a service) or a BSD.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +14,17 @@ var version = "dev"
 
 func main() {
 	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "run" {
+		// Under the Windows service manager: run until it stops the service.
+		handled, err := runService(func(ctx context.Context) error { return runCtx(ctx, args[1:]) })
+		if handled {
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "hotwatch-agent:", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
 	cmd := "run"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]

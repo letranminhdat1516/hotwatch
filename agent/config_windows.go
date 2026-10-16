@@ -44,23 +44,61 @@ func setPrivate(path, sddl string) error {
 		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
 		return err
 	}
-	// Hand ownership to Administrators when allowed (an elevated admin),
-	// so the service account and every admin pass the owner check.
-	if admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid); err == nil {
-		_ = windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, admins, nil, nil, nil)
-	}
+	giveToAdmins(path)
 	return nil
 }
 
-// PrepareConfigDir creates the config folder with privateDirDACL. Any user
-// may create folders under %ProgramData%, so an existing folder must pass
-// the same check as the config itself.
+// giveToAdmins hands ownership to Administrators when allowed (an elevated
+// admin), so the service account and every admin pass the owner check.
+func giveToAdmins(path string) {
+	if admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid); err == nil {
+		_ = windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, admins, nil, nil, nil)
+	}
+}
+
+// PrepareConfigDir creates the config folder with privateDirDACL in one
+// call, so nothing can be dropped into it before it is locked. Any user may
+// create folders under %ProgramData%, so an existing folder must pass the
+// same check as the config itself, and a junction or symlink is refused.
 func PrepareConfigDir(dir string) error {
-	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return err
-		}
-		return setPrivate(dir, privateDirDACL)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return err
+	}
+	sd, err := windows.SecurityDescriptorFromString(privateDirDACL)
+	if err != nil {
+		return err
+	}
+	name, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return err
+	}
+	sa := &windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	switch err := windows.CreateDirectory(name, sa); {
+	case err == nil:
+		giveToAdmins(dir)
+		return nil
+	case !errors.Is(err, windows.ERROR_ALREADY_EXISTS):
+		return err
+	}
+	return checkDir(dir)
+}
+
+// checkDir refuses a folder that is a reparse point (junction, symlink),
+// whose target could change after the check, or that is not private.
+func checkDir(dir string) error {
+	name, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return err
+	}
+	attrs, err := windows.GetFileAttributes(name)
+	if err != nil {
+		return fmt.Errorf("%s: %w", dir, err)
+	}
+	if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		return fmt.Errorf("%s is a junction or symbolic link; the config folder must be a plain folder", dir)
+	}
+	if attrs&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		return fmt.Errorf("%s is not a folder", dir)
 	}
 	sd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
@@ -110,12 +148,7 @@ func checkPrivate(f *os.File, path string, _ fs.FileInfo) error {
 	if err := checkSD(path, sd, fileRights); err != nil {
 		return err
 	}
-	dir := filepath.Dir(path)
-	dsd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, info)
-	if err != nil {
-		return fmt.Errorf("%s: reading access list: %w", dir, err)
-	}
-	return checkSD(dir, dsd, dirRights)
+	return checkDir(filepath.Dir(path))
 }
 
 // trusted reports SYSTEM, Administrators, OWNER RIGHTS and the account the
