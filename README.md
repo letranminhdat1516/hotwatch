@@ -262,7 +262,6 @@ Suite: `go test -count=1 ./...` on the Mac → **33 ok, 4 without tests, exit 0*
 
 Hotwatch is released under the [MIT License](LICENSE).
 
-The CICCA logo used as the app icon (`art/logo-cicca.png`, `resources/icon.png`)
-is my personal mark and is not covered by the MIT license — please don't reuse
-it for your own builds. Icons in the interface are from [Lucide](https://lucide.dev)
+The app icon (`resources/icon.png`) is drawn by `tools/iconart`. It is Hotwatch's
+own mark: please give your fork its own icon. Icons in the interface are from [Lucide](https://lucide.dev)
 (ISC, see `ui/icons/LICENSE`). Hotwatch is built on [mygo](https://github.com/egoist/mygo) (MIT).
