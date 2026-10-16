@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
@@ -39,9 +38,11 @@ func dockerEngine() (docker.Engine, func(ctx context.Context) (net.Conn, error))
 
 // dialDockerPipe connects to the daemon's pipe and refuses a server that
 // could be a squatter: any user may create a pipe of that name while Docker
-// is not running. The daemon runs as SYSTEM (Docker Engine) or from
-// Program Files (Docker Desktop's backend); winio connects anonymously, so
-// the server cannot impersonate the agent either way.
+// is not running. The server must run as SYSTEM (Docker Engine's service)
+// or be one of Docker's own programs under Program Files\Docker (Docker
+// Desktop); being anywhere under Program Files is not enough, since
+// interpreters installed there can serve any pipe. winio connects
+// anonymously, so the server cannot impersonate the agent either way.
 func dialDockerPipe(ctx context.Context, path string) (net.Conn, error) {
 	c, err := winio.DialPipeContext(ctx, path)
 	if err != nil {
@@ -83,8 +84,7 @@ func trustPipeServer(c net.Conn) error {
 	}
 	exe := windows.UTF16ToString(buf[:n])
 	for _, id := range []*windows.KNOWNFOLDERID{windows.FOLDERID_ProgramFiles, windows.FOLDERID_ProgramFilesX64} {
-		dir, err := windows.KnownFolderPath(id, 0)
-		if err == nil && dir != "" && strings.HasPrefix(strings.ToLower(exe), strings.ToLower(dir)+`\`) {
+		if dir, err := windows.KnownFolderPath(id, 0); err == nil && dockerServerImage(exe, dir) {
 			return nil
 		}
 	}
