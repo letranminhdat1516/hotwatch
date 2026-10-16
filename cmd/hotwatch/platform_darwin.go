@@ -18,3 +18,6 @@ func windowChrome(o *mygo.WindowOptions) {
 	o.TitleBarStyle = mygo.TitleBarHiddenInset
 	o.TrafficLightPosition = &mygo.Point{X: 14, Y: 14}
 }
+
+// closeBehavior hides the window on close; the Dock icon brings it back.
+func closeBehavior(win *mygo.Window) { hideOnClose(win) }

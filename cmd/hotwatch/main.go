@@ -50,6 +50,7 @@ func main() {
 			Content: ui.View(app.View)}
 		windowChrome(&opts)
 		win = mygo.NewWindow(opts)
+		closeBehavior(win)
 		startNook(c, app, win, cfg.Settings.NookOff)
 		c.startHub()
 	})
