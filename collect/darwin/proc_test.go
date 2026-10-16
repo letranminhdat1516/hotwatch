@@ -103,14 +103,24 @@ func TestProcessesHTTPServer(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
-	for i := 0; ; i++ {
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() { _ = cmd.Process.Kill(); <-exited })
+	// python3's first start on a fresh CI runner can take several seconds.
+	deadline := time.Now().Add(testenv.Budget(5 * time.Second))
+	for {
 		c, err := net.DialTimeout("tcp", "127.0.0.1:8765", 200*time.Millisecond)
 		if err == nil {
 			c.Close()
 			break
 		}
-		if i > 50 {
+		select {
+		case err := <-exited:
+			exited <- err
+			t.Fatalf("server exited before listening: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
 			t.Fatal("server did not start")
 		}
 		time.Sleep(100 * time.Millisecond)
