@@ -5,12 +5,13 @@
 <h1 align="center">Hotwatch</h1>
 
 <p align="center">
-  A small, fast system monitor for your Mac — and for the Linux boxes you look after.
+  A small, fast system monitor for your Mac, PC or Linux desktop — and for the servers you look after.
 </p>
 
 <p align="center">
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-111?logo=apple">
-  <img alt="Linux agent" src="https://img.shields.io/badge/agent-Linux%20amd64%20%7C%20arm64-111?logo=linux&logoColor=white">
+  <img alt="Windows 10+ and Server" src="https://img.shields.io/badge/Windows-10%2B%20%7C%20Server-111?logo=windows">
+  <img alt="Linux" src="https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-111?logo=linux&logoColor=white">
   <img alt="Go 1.27" src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white">
   <img alt="MIT" src="https://img.shields.io/badge/license-MIT-e11d48">
 </p>
@@ -21,9 +22,24 @@
 
 Hotwatch shows what your machine is doing — CPU, memory, disk, network, GPU,
 battery and every process — in one native window, and it shows the same for
-remote Linux hosts: a VPS, a home server, a GPU box. It is written in Go on
-[mygo](https://github.com/egoist/mygo), draws its own UI, and needs no cgo,
-Electron or web view.
+remote hosts: a VPS, a home server, a GPU box, a Windows Server. It is written
+in Go on [mygo](https://github.com/egoist/mygo), draws its own UI, and needs no
+cgo, Electron or web view.
+
+## Platforms
+
+| | App | Agent (remote host) |
+|---|---|---|
+| macOS 14+ (Apple silicon) | ✅ everything, incl. Apps, Homebrew/mise, the notch island | — |
+| Windows 10/11 | ✅ CPU, memory, disks, network, battery, NVIDIA GPU, processes | ✅ as a Windows service |
+| Windows Server 2022/2025 | ✅ as above | ✅ as a Windows service, Docker over its named pipe |
+| Linux (amd64, arm64) | ✅ as above, plus load average and memory pressure | ✅ under systemd, Docker over its socket |
+| FreeBSD and other BSDs | builds (portable collector) | builds (portable collector) |
+
+Apps, Homebrew/mise and the notch island are macOS features. The app keeps
+host tokens in the Keychain on macOS, the Credential Manager on Windows and
+the Secret Service (`secret-tool`) on Linux, with a private file as the
+fallback.
 
 I built it because I wanted one place to glance at my laptop, my build box
 and my VPS, without opening three terminals.
@@ -75,22 +91,23 @@ and my VPS, without opening three terminals.
 
 ## How remote hosts work
 
-Each Linux host runs `hotwatch-agent`, a single static binary (about 11 MB) under
-systemd. It never listens on a public address:
+Each remote host runs `hotwatch-agent`, a single static binary (about 11 MB)
+under systemd or as a Windows service. It never listens on a public address:
 
 - **Tailscale** — the agent binds to the host's Tailscale IP only; the app talks to it
   over your tailnet.
 - **SSH tunnel** — the agent binds to `127.0.0.1`; the app opens an SSH tunnel with
   your existing key or ssh-agent.
 
-Every request carries a per-host token. The host stores only its SHA-256; the Mac
-keeps the token in the Keychain. An agent can also run read-only, refusing every
+Every request carries a per-host token. The host stores only its SHA-256; the app
+keeps the token in the system's secret store. An agent can also run read-only, refusing every
 action that changes something.
 
 ## Getting started
 
-You need Go 1.27 and a Mac on Apple silicon running macOS 14 or later. That's it —
-no Xcode, no Node.
+You need Go 1.27. That's it — no Xcode, no Node, no Visual Studio.
+
+**macOS** (Apple silicon, macOS 14 or later):
 
 ```sh
 git clone https://github.com/letranminhdat1516/hotwatch.git
@@ -108,6 +125,18 @@ while hacking, `make run` does `go run ./cmd/hotwatch`.
 > host tokens once — answer **Always Allow**. Unsigned builds look like a new app
 > to the Keychain every time and ask again.
 
+**Windows and Linux** — build on any machine, including a Mac:
+
+```sh
+make app-windows-linux                    # dist/windows-amd64/Hotwatch.exe, dist/linux-amd64/*.deb, .tar.gz
+```
+
+On Windows run `Hotwatch.exe` (ending another user's process needs an
+administrator). On Linux install the `.deb` or run `sh install.sh` beside the
+`.tar.gz`; the app needs GTK 3, which every desktop has. With
+[NSIS](https://nsis.sourceforge.io) installed, the build also makes a Windows
+installer.
+
 ### Adding a Linux host
 
 ```sh
@@ -123,32 +152,51 @@ its unit. It prints a token once — paste it into **Add host…** in the app.
 Docker support needs nothing extra: if the agent's user can reach the Docker
 socket, the Docker page appears.
 
+### Adding a Windows or Windows Server host
+
+Copy `dist/hotwatch-agent-windows-amd64.exe` (renamed `hotwatch-agent.exe`) and
+`deploy/install.ps1` to the host, then from an elevated PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -Mode tailscale
+```
+
+It installs the agent to `C:\Program Files\Hotwatch`, writes the config to
+`C:\ProgramData\Hotwatch` (readable only by SYSTEM and Administrators), adds a
+firewall rule that admits the tailnet only, and creates the `hotwatch-agent`
+service. Like the Linux installer it asks before every step and prints the token
+once. Docker Engine or Docker Desktop is found on its named pipe.
+
 ## Development
 
 ```sh
-go test ./...                             # everything that runs on a Mac
+go test ./...                             # everything that runs on this machine
 go vet ./...
-make agent                                # cross-compile the agent
+make agent                                # the agent for Linux, Windows and FreeBSD
 go run ./cmd/hwshot /tmp/cpu.png cpu 0 - dark   # render any page to a PNG
 ```
 
-The Linux collector and agent tests are meant for Linux; I run them in a
-`golang:1.27` container (`scripts/box.sh`). The Docker lifecycle test talks to a
+CI runs the suite on Ubuntu, macOS, Windows Server 2025 and Windows Server 2022,
+and cross-builds FreeBSD, Windows on ARM and Linux on ARM
+(`.github/workflows/ci.yml`). Locally I run the Linux tests in a `golang:1.27`
+container (`scripts/box.sh`). The Docker lifecycle test talks to a
 real daemon and is behind a build tag: `go test -tags dockerint ./docker`.
 
 ```
-cmd/hotwatch         the Mac app
-cmd/hotwatch-agent   the Linux agent
-collect/             metric collectors (darwin, linux)
+cmd/hotwatch         the app (macOS, Windows, Linux)
+cmd/hotwatch-agent   the agent (Linux, Windows service, BSD)
+collect/             metric collectors (darwin, linux, portable for Windows/BSD)
 hub/                 polling, history, connection state, actions
 ui/                  shell, pages, components, the notch island
 mac/                 macOS bits: app icons, notch, sensors, apps, Homebrew/mise
 agent/, transport/   the agent's API, auth, SSH tunnels
-deploy/              installer and systemd unit
+deploy/              installers (sh + systemd, PowerShell + Windows service)
 tools/iconart        draws the app icon
 ```
 
-Settings live in `~/Library/Application Support/Hotwatch/config.json`. To see
+Settings live in `~/Library/Application Support/Hotwatch/config.json` on macOS,
+`%APPDATA%\Hotwatch\config.json` on Windows and `~/.config/hotwatch/config.json`
+on Linux. To see
 where CPU time goes, start the app with `HOTWATCH_CPUPROFILE=/tmp/cpu.prof`; it
 writes a profile of its first minute.
 
@@ -162,7 +210,11 @@ and one VPS. Things I know about:
 - The Vietnamese translation exists but isn't wired into the pages yet.
 - There's no menu-bar item (the notch covers that on notched Macs).
 - Builds are signed for development; shipping to other Macs needs a Developer ID
-  and notarisation.
+  and notarisation. Windows builds are unsigned, so SmartScreen warns on first run.
+- Windows and Linux support is new (2026-10-16): it is unit-tested, cross-built
+  and covered by CI, but the app has not yet been used day to day on a real PC
+  or Linux desktop. Process energy, per-process network traffic, CPU temperature
+  and an "About This PC" page are macOS-only for now.
 
 <details>
 <summary>Requirement traceability (last verified 2026-10-15)</summary>
@@ -202,6 +254,7 @@ Suite: `go test -count=1 ./...` on the Mac → **33 ok, 4 without tests, exit 0*
 | R23 | Navigation across the top | `ui/shell.go` | `TestShell*` (9) | ⚠️ | replaced at the owner's request by a left sidebar |
 | R24 | Host panel on the right | `ui/shell.go` host switcher | `TestHostSwitch*` (4) | ⚠️ | replaced with R23: hosts are a switcher at the foot of the sidebar |
 | R25 | First data < 1 s; page or host switch < 100 ms | `cmd/hotwatch/wire.go` | `TestTimings` | ✅ | app log: `ui.first_data ms=390`; 11 `ui.switch` entries, the slowest 11 ms |
+| R26 | Windows, Windows Server and other systems, app and agent (owner request 2026-10-16) | `collect/portable`, `source/local/local_{linux,windows,other}.go`, `store/{wincred_windows,secrettool,filesecrets}.go`, `cmd/hotwatch-agent/platform_windows.go`, `agent/config_windows.go`, `deploy/install.ps1`, `.github/workflows/ci.yml` | `collect/portable` (11), `TestSignalRefusesCriticalWindowsProcesses`, `TestDockerServerImage`, `TestCheckAcceptsAGoodConfig…`, `TestAppDirPerOS`, `TestLocalHostNamePerOS`, `TestFileSecrets…`, `TestSecretTool…`; Windows-only: `TestCredentialManagerRoundTrip`, `TestLoadConfigRejects…`, `TestConfigRefusesJunctionFolder`, `TestDockerPipeRejectsUntrustedServer`, `TestSystemSampleOnWindows`; Linux/Windows: `TestNewReadsThisMachine` | ⚠️ | 2026-10-16 on the Mac: `go test ./...` 34 ok; `go vet ./...` clean for windows/amd64, windows/arm64, linux/amd64, linux/arm64, freebsd/amd64 (tests compiled); `mygo build -platform windows/amd64,linux/amd64` → Hotwatch.exe 15.7 MB, .deb 6.3 MB. **Not yet run:** the Windows-only and Linux tests (agent-box was offline; they run on the first CI push), the app on a real Windows or Linux desktop, the agent as a real Windows service |
 
 </details>
 
