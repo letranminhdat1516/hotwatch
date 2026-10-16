@@ -39,12 +39,24 @@ $dataDir = Join-Path $env:ProgramData 'Hotwatch'
 $config = Join-Path $dataDir 'agent.json'
 $service = 'hotwatch-agent'
 
-Confirm-Step "Install $Binary to $exe"
+$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Binary).Hash.ToLower()
+Confirm-Step "Install $Binary (SHA-256 $hash) to $exe"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Copy-Item -LiteralPath $Binary -Destination $exe -Force
+# Compare what was installed, which is what the service will run.
+$installed = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLower()
+if ($installed -ne $hash) {
+	Write-Error "install.ps1: $exe changed while copying (SHA-256 $installed); not continuing"
+}
 
 if (Test-Path -LiteralPath $config) {
-	Write-Host "$config already exists; keeping it (rotate with: hotwatch-agent init --mode $Mode --rotate)."
+	# Any user may create folders under ProgramData: keep an existing config
+	# only if the agent accepts it (owner, access list, no junction).
+	& $exe check --config $config
+	if ($LASTEXITCODE -ne 0) {
+		Write-Error "install.ps1: the existing $config is not safe to keep; remove $dataDir after checking who created it, then run again"
+	}
+	Write-Host "Keeping $config (rotate with: hotwatch-agent init --mode $Mode --rotate)."
 } else {
 	Confirm-Step "Write $config for mode $Mode (folder and file readable only by SYSTEM and Administrators) and print the access token (shown once, stored only as a hash)"
 	& $exe init --mode $Mode

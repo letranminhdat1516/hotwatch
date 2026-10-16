@@ -65,6 +65,9 @@ func runCtx(ctx context.Context, args []string) error {
 	if err := waitAssigned(cfg.Listen, interfaceIPs, wallClock{}, log.Printf); err != nil {
 		return err
 	}
+	if err := prepareDataDir(); err != nil {
+		return err
+	}
 	audit, err := openAudit(auditPath())
 	if err != nil {
 		return fmt.Errorf("audit log: %w", err)

@@ -11,9 +11,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// defaultConfigPath is under the ProgramData known folder, not the
+// environment variable, which a caller could point elsewhere.
 func defaultConfigPath() string {
-	dir := os.Getenv("ProgramData")
-	if dir == "" {
+	dir, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil || dir == "" {
 		dir = `C:\ProgramData`
 	}
 	return filepath.Join(dir, "Hotwatch", "agent.json")

@@ -35,10 +35,12 @@ func main() {
 		err = cmdInit(args, os.Stdout, os.Stderr, tailscaleIP)
 	case "run":
 		err = cmdRun(args)
+	case "check":
+		err = cmdCheck(args, os.Stdout)
 	case "version":
 		fmt.Println("hotwatch-agent", version)
 	default:
-		err = fmt.Errorf("unknown command %q (want init, run or version)", cmd)
+		err = fmt.Errorf("unknown command %q (want init, run, check or version)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "hotwatch-agent:", err)

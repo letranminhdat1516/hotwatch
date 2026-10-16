@@ -13,6 +13,10 @@ const dockerSocket = "/var/run/docker.sock"
 
 func auditPath() string { return "/var/log/hotwatch/audit.log" }
 
+// prepareDataDir is a no-op: the installer creates /var/log/hotwatch for
+// the service user.
+func prepareDataDir() error { return nil }
+
 func dockerEngine() (docker.Engine, func(ctx context.Context) (net.Conn, error)) {
 	dial := func(ctx context.Context) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", dockerSocket)

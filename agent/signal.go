@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"strings"
 	"syscall"
 	"time"
 
@@ -48,17 +47,8 @@ func NewSystemSignaller(lookup func(ctx context.Context, pid int32) (model.Proce
 	return &signaller{lookup: lookup, kill: systemKill, pin: openPin, protect: systemProtect}
 }
 
-// windowsCritical reports the Windows processes whose end stops or reboots
-// the machine; names compare without case.
-func windowsCritical(p model.Process) bool {
-	switch strings.ToLower(p.Name) {
-	case "system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe",
-		"services.exe", "lsass.exe", "lsaiso.exe", "memory compression", "secure system",
-		"system idle process":
-		return true
-	}
-	return false
-}
+// windowsCritical refuses the Windows processes whose end stops the machine.
+func windowsCritical(p model.Process) bool { return model.WindowsCritical(p.Name) }
 
 // check verifies pid exists and still has the start time the caller saw.
 // Start times are compared exactly: the collector and lookup derive them from
