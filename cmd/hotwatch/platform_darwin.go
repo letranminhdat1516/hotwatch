@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+
 	"github.com/egoist/mygo"
 
 	"hotwatch/source"
@@ -10,7 +12,17 @@ import (
 
 func newLocalSource() source.Source { return local.New() }
 
-func newSecrets(paths) (store.Secrets, error) { return store.NewKeychain("Hotwatch") }
+// newSecrets keeps host tokens in a 0600 file beside the config, so the
+// Keychain never asks. A token an older build left in the Keychain is moved
+// into the file the first time it is read.
+func newSecrets(p paths) (store.Secrets, error) {
+	f := store.NewFileSecrets(filepath.Join(filepath.Dir(p.Config), "secrets.json"))
+	kc, err := store.NewKeychain("Hotwatch")
+	if err != nil {
+		return f, nil
+	}
+	return store.Migrating{To: f, From: kc}, nil
+}
 
 // windowChrome hides the title bar; the sidebar draws under the traffic
 // lights.

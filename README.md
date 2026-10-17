@@ -37,9 +37,9 @@ cgo, Electron or web view.
 | FreeBSD and other BSDs | builds (portable collector) | builds (portable collector) |
 
 Apps, Homebrew/mise and the notch island are macOS features. The app keeps
-host tokens in the Keychain on macOS, the Credential Manager on Windows and
-the Secret Service (`secret-tool`) on Linux, with a private file as the
-fallback.
+host tokens in a private (0600) file beside its config on macOS, the
+Credential Manager on Windows and the Secret Service (`secret-tool`) on Linux,
+with a private file as the fallback.
 
 I built it because I wanted one place to glance at my laptop, my build box
 and my VPS, without opening three terminals.
@@ -121,9 +121,10 @@ certificate there (`security find-identity -p codesigning` lists them), or use
 `"-"` for an ad-hoc signature that runs on your own Mac. For a quick unsigned run
 while hacking, `make run` does `go run ./cmd/hotwatch`.
 
-> A signed build keeps one identity across rebuilds, so the Keychain asks for the
-> host tokens once — answer **Always Allow**. Unsigned builds look like a new app
-> to the Keychain every time and ask again.
+> Host tokens live in `~/Library/Application Support/Hotwatch/secrets.json`
+> (0600), so no build asks for the Keychain. A token an older build stored in the
+> Keychain is moved into that file the first time it is read — the Keychain asks
+> once more then.
 
 **Windows and Linux** — build on any machine, including a Mac:
 

@@ -32,7 +32,7 @@ Every Must is covered (see "Coverage" at the end). None is uncovered; the caveat
  │ source/local ─▶ collect/darwin, gpu/apple,   │           └──────────────────────────────┘
  │                 power/, mac/apps, mac/pkgs   │
  │ source/remote ─▶ agentclient/                │
- │ store/  config.json · Keychain tokens        │
+ │ store/  config.json · secrets.json tokens    │
  └──────────────────────────────────────────────┘
  model/  shared types + protocol version (imported by both sides)
 ```
@@ -50,7 +50,7 @@ Every Must is covered (see "Coverage" at the end). None is uncovered; the caveat
 | `transport` | Per-host dialer: `Direct` (TCP to Tailscale/LAN address) or `SSH` (golang.org/x/crypto/ssh client, ssh-agent via `SSH_AUTH_SOCK` or key file, strict `known_hosts` check; dials the agent's 127.0.0.1 port through the SSH connection; one SSH connection per host, reused) | `golang.org/x/crypto/ssh` |
 | `agentclient` | HTTP client for the agent protocol over a `transport` dialer: timeouts, size limits, strict JSON decode, log stream reader | `model`, `transport` |
 | `hub` | One `Poller` goroutine per host, `History` ring buffers, `ConnState` machine, `ActionRunner` (confirm → run → result) | `source`, `model` |
-| `store` | Host tree + settings in `~/Library/Application Support/Hotwatch/config.json` (atomic write, versioned); tokens in mygo `Secrets` (Keychain) | `model`, mygo |
+| `store` | Host tree + settings in `~/Library/Application Support/Hotwatch/config.json` (atomic write, versioned); tokens in `Secrets` (0600 `secrets.json` beside it; older Keychain tokens move there on first read) | `model`, mygo |
 | `ui` | Window shell (TopBar, content, HostPanel), pages, shared components, theme tokens, i18n (en, vi) | mygo `ui`, `ui/chart`, `hub` |
 | `agent` | Server, auth middleware, handlers, sampler lifecycle, audit log, config file | `model`, `collect/linux`, `gpu/nvidia`, `docker` |
 | `cmd/hotwatch`, `cmd/hotwatch-agent` | Entry points, flags, wiring | everything above |
@@ -158,11 +158,11 @@ App-side persistent state (`config.json`, versioned, written atomically via temp
 }
 ```
 
-Tokens are not in this file: `Secrets` key `hotwatch/host/<id>` (macOS Keychain). In-memory only: `History` rings, current snapshots, process/container lists, action log.
+Tokens are not in this file: `Secrets` key `hotwatch/host/<id>` (macOS: 0600 `secrets.json`). In-memory only: `History` rings, current snapshots, process/container lists, action log.
 
 SSH host keys the user accepted in the app are stored in `~/Library/Application Support/Hotwatch/known_hosts` (`~/.ssh/known_hosts` is read but never written).
 
-Agent config `/etc/hotwatch/agent.json` (mode 0600, owner `hotwatch`): `{"listen":"127.0.0.1:7171","tokenSHA256":"…","readOnly":false,"intervalMs":2000}`. The plain token is printed once by `hotwatch-agent init` and stored only in the Mac's Keychain.
+Agent config `/etc/hotwatch/agent.json` (mode 0600, owner `hotwatch`): `{"listen":"127.0.0.1:7171","tokenSHA256":"…","readOnly":false,"intervalMs":2000}`. The plain token is printed once by `hotwatch-agent init` and stored only in the Mac's `secrets.json`.
 
 ## Interfaces / contracts between parts
 
