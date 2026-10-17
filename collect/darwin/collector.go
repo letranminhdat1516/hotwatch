@@ -40,6 +40,10 @@ type collector struct {
 	netKinds       map[string]netKind
 	netKindsKey    string
 
+	readSensors func() ([]sensors.Reading, error)
+	sensors     []sensors.Reading // last temperature read, reused for sensorsEvery
+	sensorsAt   time.Time
+
 	prevProc map[procKey]procPrev
 	statics  map[procKey]procStatic // static facts of the last scan's processes
 	ports    portCache
@@ -47,10 +51,14 @@ type collector struct {
 	nettop   func(context.Context) ([]byte, error) // nil: no per-process network
 }
 
+// sensorsEvery is how often temperatures are read: one read waits tens of
+// milliseconds on the HID service, and temperatures move slowly.
+const sensorsEvery = 5 * time.Second
+
 // New returns a Collector for the local Mac. Sample must not be called
 // concurrently.
 func New() collect.Collector {
-	return &collector{now: time.Now, apfsList: runDiskutilAPFS, hdiutil: runHdiutilInfo, nettop: runNettop}
+	return &collector{now: time.Now, readSensors: sensors.Read, apfsList: runDiskutilAPFS, hdiutil: runHdiutilInfo, nettop: runNettop}
 }
 
 func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
@@ -78,7 +86,14 @@ func (c *collector) Sample(ctx context.Context) (model.Snapshot, error) {
 	}
 	// Temperatures are optional: a Mac without readable die sensors (Intel)
 	// leaves them nil and the section complete.
-	if r, err := sensors.Read(); err == nil {
+	if s.Time.Sub(c.sensorsAt) >= sensorsEvery || s.Time.Before(c.sensorsAt) {
+		r, err := c.readSensors()
+		if err != nil {
+			r = nil
+		}
+		c.sensors, c.sensorsAt = r, s.Time
+	}
+	if r := c.sensors; r != nil {
 		if avg, hot, ok := sensors.CPU(r); ok {
 			s.CPU.TempC, s.CPU.TempMaxC = &avg, &hot
 		}

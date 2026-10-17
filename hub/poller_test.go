@@ -572,3 +572,26 @@ func TestOffPageProcessScansDoNotFollowAFastInterval(t *testing.T) {
 		}
 	})
 }
+
+func TestHiddenWindowPollsSnapshotsButNotProcesses(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a := newCounting()
+		a.InfoV.Caps.Processes = true
+		h, _ := start(t, time.Second, map[string]source.Source{"a": a})
+		defer h.Stop()
+		h.Select("a", PageHidden)
+		advance(30 * time.Second)
+		_, s, p, _ := a.counts()
+		if p != 0 {
+			t.Fatalf("procs while hidden = %d, want 0", p)
+		}
+		if s < 20 {
+			t.Fatalf("snapshots while hidden = %d, want one a second", s)
+		}
+		h.Select("a", "overview") // shown again: processes at once
+		advance(100 * time.Millisecond)
+		if _, _, p, _ := a.counts(); p != 1 {
+			t.Fatalf("procs on showing = %d, want 1", p)
+		}
+	})
+}

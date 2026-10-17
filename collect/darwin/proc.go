@@ -50,7 +50,9 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 		return nil, err
 	}
 	now := c.now()
-	list, err := gproc.ProcessesWithContext(ctx)
+	// One sysctl lists every process with its identity (start time, command
+	// name, uid) and parent.
+	list, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +67,7 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 	results := make([]*procResult, len(list))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
-	for i, gp := range list {
+	for i := range list {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
@@ -74,7 +76,7 @@ func (c *collector) Processes(ctx context.Context) ([]model.Process, error) {
 			if ctx.Err() != nil {
 				return
 			}
-			results[i] = readProc(ctx, gp, now, c.statics)
+			results[i] = readProc(ctx, &list[i], now, c.statics)
 		}()
 	}
 	wg.Wait()
@@ -156,38 +158,33 @@ func readStatic(ctx context.Context, gp *gproc.Process) procStatic {
 	return st
 }
 
-// readProc reads one process. statics holds the static facts of processes
-// seen before (read-only here); a process not in it is read in full.
-func readProc(ctx context.Context, gp *gproc.Process, now time.Time, statics map[procKey]procStatic) *procResult {
-	// One sysctl gives the identity (start time, command name, uid) and the
-	// parent, which changes when it exits (the child moves to launchd).
-	kp, err := unix.SysctlKinfoProc("kern.proc.pid", int(gp.Pid))
-	if err != nil || kp.Proc.P_pid != gp.Pid {
-		return nil // exited, or not identifiable: no (PID, StartTime) identity
+// readProc reads one process from its kinfo_proc. statics holds the static
+// facts of processes seen before (read-only here); a process not in it is
+// read in full.
+func readProc(ctx context.Context, kp *unix.KinfoProc, now time.Time, statics map[procKey]procStatic) *procResult {
+	pid := kp.Proc.P_pid
+	if pid < 0 {
+		return nil
 	}
 	ct := kp.Proc.P_starttime.Sec*1000 + int64(kp.Proc.P_starttime.Usec)/1000 // as gopsutil's CreateTime
 	comm := cString(kp.Proc.P_comm[:])
 	uid := kp.Eproc.Ucred.Uid
-	key := procKey{gp.Pid, ct}
+	key := procKey{pid, ct}
 	st, ok := statics[key]
 	if !ok || st.comm != comm || st.uid != uid {
-		st = readStatic(ctx, gp)
+		st = readStatic(ctx, &gproc.Process{Pid: pid})
 		st.comm, st.uid = comm, uid
 	}
-	p := model.Process{PID: gp.Pid, PPID: kp.Eproc.Ppid, StartTime: time.UnixMilli(ct),
+	p := model.Process{PID: pid, PPID: kp.Eproc.Ppid, StartTime: time.UnixMilli(ct),
 		Name: st.name, User: st.user, Command: st.command, AppBundle: st.appBundle}
 	var cur procPrev
 	cur.at = now
-	if mi, err := gp.MemoryInfoWithContext(ctx); err == nil {
-		p.RSS = mi.RSS
+	if ti, ok := taskInfo(pid); ok {
+		p.RSS = ti.rss
+		p.Threads = ti.threads
+		cur.cpuSecs = ti.cpuSecs
 	}
-	if n, err := gp.NumThreadsWithContext(ctx); err == nil {
-		p.Threads = n
-	}
-	if t, err := gp.TimesWithContext(ctx); err == nil {
-		cur.cpuSecs = t.User + t.System
-	}
-	if fp, r, w, e, ok := rusage(gp.Pid); ok {
+	if fp, r, w, e, ok := rusage(pid); ok {
 		p.Footprint = fp
 		cur.read, cur.write, cur.energy, cur.haveIO = r, w, e, true
 	}
@@ -255,8 +252,12 @@ const (
 var (
 	rusageOnce sync.Once
 	rusageFn   func(pid int32, flavor int32, buf *byte) int32
+	pidInfoFn  func(pid, flavor int32, arg uint64, buf *byte, size int32) int32
+	tickNanos  float64 // mach absolute time unit in ns
 )
 
+// loadRusage loads proc_pid_rusage and proc_pidinfo once; gopsutil opens
+// libSystem again on every call.
 func loadRusage() {
 	lib, err := purego.Dlopen("/usr/lib/libSystem.B.dylib", purego.RTLD_NOW|purego.RTLD_GLOBAL)
 	if err != nil {
@@ -265,6 +266,50 @@ func loadRusage() {
 	var fn func(pid int32, flavor int32, buf *byte) int32
 	purego.RegisterLibFunc(&fn, lib, "proc_pid_rusage")
 	rusageFn = fn
+	var info func(pid, flavor int32, arg uint64, buf *byte, size int32) int32
+	purego.RegisterLibFunc(&info, lib, "proc_pidinfo")
+	var timebase func(info *[2]uint32) int32
+	purego.RegisterLibFunc(&timebase, lib, "mach_timebase_info")
+	var tb [2]uint32 // numer, denom
+	if timebase(&tb) == 0 && tb[1] != 0 {
+		pidInfoFn, tickNanos = info, float64(tb[0])/float64(tb[1])
+	}
+}
+
+// proc_taskinfo (<sys/proc_info.h>), flavor PROC_PIDTASKINFO.
+const (
+	procPidTaskInfo = 4
+	taskInfoSize    = 96
+	offResidentSize = 8
+	offTotalUser    = 16 // mach absolute time units
+	offTotalSystem  = 24
+	offThreadNum    = 84
+)
+
+type task struct {
+	rss     uint64
+	threads int32
+	cpuSecs float64
+}
+
+// taskInfo reads the resident size, thread count and CPU time in one
+// proc_pidinfo call; ok is false when it fails (EPERM for other users'
+// processes).
+func taskInfo(pid int32) (t task, ok bool) {
+	rusageOnce.Do(loadRusage)
+	if pidInfoFn == nil {
+		return t, false
+	}
+	var buf [taskInfoSize]byte
+	if pidInfoFn(pid, procPidTaskInfo, 0, &buf[0], taskInfoSize) != taskInfoSize {
+		return t, false
+	}
+	ticks := leU64(buf[offTotalUser:]) + leU64(buf[offTotalSystem:])
+	return task{
+		rss:     leU64(buf[offResidentSize:]),
+		threads: int32(uint32(buf[offThreadNum]) | uint32(buf[offThreadNum+1])<<8 | uint32(buf[offThreadNum+2])<<16 | uint32(buf[offThreadNum+3])<<24),
+		cpuSecs: float64(ticks) * tickNanos / 1e9,
+	}, true
 }
 
 // rusage reads proc_pid_rusage (v6, else v4): the physical footprint,

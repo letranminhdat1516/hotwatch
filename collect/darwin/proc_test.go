@@ -219,6 +219,22 @@ func BenchmarkProcesses(b *testing.B) {
 	}
 }
 
+// BenchmarkProcessesInProcess is the scan without the nettop and lsof
+// children: only the work done inside the app.
+func BenchmarkProcessesInProcess(b *testing.B) {
+	col := New().(*collector)
+	col.nettop = nil
+	col.lsof = func(context.Context) ([]byte, error) { return nil, nil }
+	ctx := context.Background()
+	col.Processes(ctx)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := col.Processes(ctx); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 const fakeLsof = "p42\nf1\ntIPv4\nPTCP\nn*:1234\n"
 
 type fakeRunner struct {

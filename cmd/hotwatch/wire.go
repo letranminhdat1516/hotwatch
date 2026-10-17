@@ -511,6 +511,7 @@ type core struct {
 	stopped sync.Once
 
 	selHost, selPage string // last selection, for the hub once it starts
+	hidden           bool   // the main window is hidden or minimized
 }
 
 func newCore(cfg store.Config, p paths, secrets store.Secrets, local func() source.Source, post func(func()), log *slog.Logger) *core {
@@ -561,8 +562,24 @@ func (c *core) onSelect(host, page string) {
 	c.times.selected()
 	c.selHost, c.selPage = host, page
 	if c.hub != nil {
-		c.hub.Select(host, page)
+		c.hub.Select(host, c.hubPage())
 	}
+}
+
+// setWindowShown tells the hub whether the main window shows page data.
+func (c *core) setWindowShown(shown bool) {
+	c.hidden = !shown
+	if c.hub != nil {
+		c.hub.Select(c.selHost, c.hubPage())
+	}
+}
+
+// hubPage is the page the hub polls for: none while the window is hidden.
+func (c *core) hubPage() string {
+	if c.hidden {
+		return hub.PageHidden
+	}
+	return c.selPage
 }
 
 // attach wires app to the core. warn is store.Load's warning, shown once.
@@ -678,7 +695,7 @@ func (c *core) host(id string) (store.Host, bool) {
 // useHub adopts h and tells it the selection and the visible hosts.
 func (c *core) useHub(h hubAPI) {
 	c.hub = h
-	h.Select(c.selHost, c.selPage)
+	h.Select(c.selHost, c.hubPage())
 	h.SetVisible(c.hostIDs())
 }
 
