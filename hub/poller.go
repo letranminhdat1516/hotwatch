@@ -193,8 +193,10 @@ func (h *Hub) poll(p *host, t tier, page string) {
 	}
 	// Processes: every poll on their page; otherwise every procsOffPage for
 	// hosts that report them, so the Overview's by-app views have data on
-	// every page. Containers only on the Docker page.
-	wantProcs := page == PageProcesses || (p.info.Caps.Processes && now.Sub(p.procsAt) >= procsOffPage)
+	// every page, and never while the window is hidden. Containers only on
+	// the Docker page.
+	wantProcs := page == PageProcesses ||
+		(page != PageHidden && p.info.Caps.Processes && now.Sub(p.procsAt) >= procsOffPage)
 	if wantProcs {
 		p.procsAt = now
 	}

@@ -35,6 +35,9 @@ const (
 const (
 	PageProcesses = "processes"
 	PageDocker    = "docker"
+	// PageHidden: no window shows page data; the selected host's snapshot is
+	// still polled (the nook shows it), its processes are not.
+	PageHidden = "hidden"
 )
 
 // Hub polls every source according to its tier and publishes HostViews.

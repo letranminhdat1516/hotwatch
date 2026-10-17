@@ -1232,3 +1232,21 @@ func TestRetryDirectHostBypassesQueue(t *testing.T) {
 		t.Fatalf("retry waited for the edit queue: calls %v", e.hub.got())
 	}
 }
+
+func TestHiddenWindowSelectsNoPage(t *testing.T) {
+	e := newEffEnv(t, store.Default())
+	e.w.onSelect("local", "cpu")
+	e.w.setWindowShown(false)
+	e.w.onSelect("local", "memory") // a nook click while hidden
+	e.w.setWindowShown(true)
+	want := []string{"local/cpu", "local/" + hub.PageHidden, "local/" + hub.PageHidden, "local/memory"}
+	var got []string
+	for _, c := range e.hub.got() {
+		if c.op == "select" {
+			got = append(got, c.id)
+		}
+	}
+	if len(got) < len(want) || !slices.Equal(got[len(got)-len(want):], want) {
+		t.Fatalf("selects = %v, want ending %v", got, want)
+	}
+}
