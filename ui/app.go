@@ -222,13 +222,14 @@ func copyView(v hub.HostView) hub.HostView {
 	return v
 }
 
-// HostPanel owns host management: the add/edit/remove and host-key dialogs,
-// and the per-host actions menu. The sidebar's host switcher lists the
+// HostPanel owns host management: the Hosts page, the add/edit/remove and
+// host-key dialogs, and the per-host actions menu. The sidebar's host switcher lists the
 // hosts and calls into it; RenderDialogs runs once per frame after the
 // window content. selected is the host the pages show and view returns any
 // host's latest view.
 type HostPanel interface {
 	RenderDialogs(c *ui.Context, selected string, view func(id string) hub.HostView)
+	Manage(c *ui.Context, selected string, view func(id string) hub.HostView, now time.Time)
 	OpenAdd()
 	OpenHostKey()
 	HostMenu(m *ui.Menu, h store.Host)
@@ -305,6 +306,12 @@ func (a *App) View(c *ui.Context) {
 		case "apps":
 			a.apps.Render(c, pages.AppsInput{HostID: a.selected, Now: a.now(), Actions: a.acts, Width: a.split - 6*components.Grid,
 				Procs: v.Procs, Packages: a.pkgs})
+		case "hosts":
+			if a.panel != nil {
+				a.panel.Manage(c, a.selected, func(id string) hub.HostView { return a.views[id] }, a.now())
+			} else {
+				components.EmptyState(c, "Hosts cannot be changed in this window.")
+			}
 		case "settings":
 			pages.Settings(c, &a.settingsUI, a.settings, a.changeSettings)
 		default:

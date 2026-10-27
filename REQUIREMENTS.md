@@ -11,6 +11,7 @@ Brief lines (from CLAUDE.md Project context and the owner's messages):
 - B6 "Docker management (list/start/stop/restart/logs)" / "quản lí đc docker đang chạy gì"
 - B7 "No Telegram"
 - B9 "vps là ip public thì ko cần cài tailscale" (hosts with only a public IP must work without Tailscale)
+- B10 "ko chỉnh sửa được host và delete host và ko hiện log" / "học tập thử terminus" / "log kết nối của host" (2026-10-27)
 - B8 "heavy builds/tests run on agent-box per /cicca rules"; "Ship target: private GitHub repo … Mac .app + Linux agent binary"
 
 | ID | Requirement | Source (brief line) | Acceptance criterion | MoSCoW | Fake/simplify? |
@@ -40,6 +41,7 @@ Brief lines (from CLAUDE.md Project context and the owner's messages):
 | R23 | Page navigation is a horizontal bar across the top of the window (Overview, CPU, Memory, Disk, Network, GPU, Energy, Processes, Docker, Apps, Packages), replacing a left sidebar; pages a host does not support are hidden for that host | B3, Q1 | Clicking each item switches page; selecting the VPS hides Energy/Apps/Packages; ⌘1…⌘9 jump to the first nine items | Must | No |
 | R24 | Host panel on the right side of the window: hosts arranged in a tree of user-named groups (e.g. Local › This Mac, Servers › VPS, Lab › agent-box), groups collapsible, each host showing online status and a tiny CPU/RAM readout; add, rename, move between groups, remove | B4, Q1 | Creating group "Servers" and moving the VPS into it persists across restart; collapsing a group hides its hosts; selecting a host switches every page to it | Must | Nested groups allowed; drag-and-drop replaced by a "Move to group" menu |
 | R25 | Fast: window shows first data in < 1 s after launch; switching page or host renders in < 100 ms with cached data | B1, Q5 | Timed from app log timestamps on the Mac with 3 hosts added | Must | No |
+| R27 | Hosts page (Termius-style host list) in the sidebar: every host by group with its status, address and connection type, visible Edit and Remove buttons on each host, "New host" and "New group" buttons, visible Rename/Remove group buttons on each group heading (no group headings when there are no groups), move a host to a group; the sidebar host switcher lists hosts under their group headings; plus a connection log for the selected host (time, state, reason: each state change and each new failure reason, newest 100 kept in memory) | B10, B4 | Editing the VPS address from the Hosts page reconnects it; removing a host asks first and drops it from the switcher; stopping the VPS agent adds an "Offline" line with the error; Retry adds "Connecting" then "Online" | Must | Log is in memory only (cleared on restart) |
 
 ## Faked / simplified / left out (and why)
 - **Telegram / any notifications to external services**: owner said no (B7).
