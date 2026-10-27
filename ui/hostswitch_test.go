@@ -65,3 +65,34 @@ func TestHostSwitcherWithoutPanelOnlySwitches(t *testing.T) {
 		t.Fatalf("did not switch to VPS: %q", tt.Texts())
 	}
 }
+
+func TestHostsPageInSidebarManagesHosts(t *testing.T) {
+	tt := ui.NewTester(switcherApp(true).View, 1400, 900)
+	if err := tt.Click("Hosts"); err != nil {
+		t.Fatalf("%v (texts %q)", err, tt.Texts())
+	}
+	for _, s := range []string{"New host", "Edit VPS", "Remove VPS", "Connection log · Mac"} {
+		if _, ok := tt.Find(s); !ok {
+			t.Fatalf("missing %q on the Hosts page: %q", s, tt.Texts())
+		}
+	}
+	if err := tt.Click("Edit VPS"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(tt.Texts(), "Edit host") {
+		t.Fatalf("edit form not open: %q", tt.Texts())
+	}
+}
+
+func TestHostSwitcherOpensHostsPage(t *testing.T) {
+	tt := ui.NewTester(switcherApp(true).View, 1400, 900)
+	if err := tt.Click("Mac"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("Manage hosts…"); err != nil {
+		t.Fatalf("%v (texts %q)", err, tt.Texts())
+	}
+	if _, ok := tt.Find("Edit VPS"); !ok {
+		t.Fatalf("Hosts page not shown: %q", tt.Texts())
+	}
+}

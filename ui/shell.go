@@ -48,6 +48,7 @@ var groups = []group{
 		{Key: "apps", Title: "Apps", icon: icons.Apps, needs: func(c model.Caps) bool { return c.Apps }},
 		{Key: "packages", Title: "Packages", icon: icons.Packages, needs: func(c model.Caps) bool { return c.Packages }},
 		{Key: "about", Title: "About This Mac", icon: icons.Info, needs: func(c model.Caps) bool { return c.Apps }},
+		{Key: "hosts", Title: "Hosts", icon: icons.Host},
 		{Key: "settings", Title: "Settings", icon: icons.Settings},
 	}},
 }
@@ -344,6 +345,19 @@ func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
 				add.Children(func() {
 					ui.Text(c, "+").FontSize(13).FontWeight(600).TextColor(t.Accent).Width(8)
 					ui.Text(c, "Add host…").FontSize(13).TextColor(t.Accent).SingleLine().Grow(1)
+				})
+				manage := ui.Row(c).Key("hs-manage").AlignItems(ui.Center).Gap(components.Grid).
+					Padding(6, components.Grid).Radius(components.Grid)
+				if manage.Hovered() {
+					manage.Background(t.SurfaceHover)
+				}
+				if manage.Clicked() {
+					a.hostMenuOpen = false
+					a.setPage("hosts")
+				}
+				manage.Children(func() {
+					components.Glyph(c, icons.Host, 12, t.TextMuted)
+					ui.Text(c, "Manage hosts…").FontSize(13).SingleLine().Grow(1)
 				})
 			}
 		}
