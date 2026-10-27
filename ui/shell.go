@@ -304,6 +304,9 @@ func navValue(page string, s *model.Snapshot) string {
 	return ""
 }
 
+// hostGrouper is a host panel that knows which group each host is in.
+type hostGrouper interface{ GroupTitle(hostID string) string }
+
 // hostSwitcher is the bottom block: the current host, and on click an inline
 // list of the other hosts to switch to.
 func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
@@ -311,9 +314,26 @@ func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
 	cur, _ := a.host()
 	ui.Column(c).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Padding(components.Grid).Gap(2).Children(func() {
 		if a.hostMenuOpen {
-			for _, h := range a.hosts {
-				if h.ID == a.selected {
+			grouper, _ := a.panel.(hostGrouper)
+			heading := ""
+			for _, id := range a.hostOrder() {
+				i := slices.IndexFunc(a.hosts, func(h store.Host) bool { return h.ID == id })
+				if id == a.selected || i < 0 {
 					continue
+				}
+				h := a.hosts[i]
+				// A heading each time the list enters another group.
+				if grouper != nil {
+					// Loose hosts come after the groups; "No group" keeps
+					// them from reading as part of the last one.
+					if g := grouper.GroupTitle(id); g != heading {
+						heading = g
+						if g == "" {
+							g = "No group"
+						}
+						ui.Text(c, g).Key("hs-g-"+g).FontSize(11).FontWeight(600).TextColor(t.TextMuted).
+							SingleLine().Padding(components.Grid, components.Grid, 2, components.Grid)
+					}
 				}
 				item := ui.Row(c).Key("hs-"+h.ID).AlignItems(ui.Center).Gap(components.Grid).
 					Padding(6, components.Grid).Radius(components.Grid)

@@ -91,12 +91,7 @@ func TestManageGroupActionsAndMove(t *testing.T) {
 	if g, _ := hostByName(h.eff.last(t), "VPS"); g.Group != "g-local" {
 		t.Fatalf("group = %q", g.Group)
 	}
-	if err := h.tt.Click("Group actions Servers"); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.tt.ChooseMenuItem("Rename…"); err != nil {
-		t.Fatalf("%v (menu %q)", err, h.tt.Menu())
-	}
+	h.click("Rename Servers")
 	h.replace("Name", "Cloud")
 	h.click("Rename")
 	if !has(h.tt, "Cloud") {
@@ -133,5 +128,35 @@ func TestManageClickSelectsAndShowsItsLog(t *testing.T) {
 	h.tt.Frame()
 	if !has(h.tt, "No connection events yet.") {
 		t.Fatalf("no empty state: %q", h.tt.Texts())
+	}
+}
+
+func TestManageRemoveGroupButton(t *testing.T) {
+	h := newManage(t, baseConfig())
+	if has(h.tt, "•••") {
+		t.Fatal("group actions still hidden behind •••")
+	}
+	h.click("Remove group Web")
+	cfg := h.eff.last(t)
+	if slices.ContainsFunc(cfg.Groups, func(g store.Group) bool { return g.ID == "g-web" }) {
+		t.Fatal("group not removed")
+	}
+	if nas, _ := hostByName(cfg, "NAS"); nas.Group != "g-srv" {
+		t.Fatalf("NAS moved to %q, want the parent", nas.Group)
+	}
+}
+
+func TestManageWithoutGroupsHasNoNoGroupHeading(t *testing.T) {
+	cfg := baseConfig()
+	cfg.Groups = nil
+	for i := range cfg.Hosts {
+		cfg.Hosts[i].Group = ""
+	}
+	h := newManage(t, cfg)
+	if has(h.tt, "No group") {
+		t.Fatalf("heading shown with no groups: %q", h.tt.Texts())
+	}
+	if !has(h.tt, "VPS") || !has(h.tt, "NAS") {
+		t.Fatalf("hosts missing: %q", h.tt.Texts())
 	}
 }

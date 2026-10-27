@@ -253,7 +253,7 @@ func (p *Panel) groupRow(c *ui.Context, g store.Group, depth int) {
 		}
 		m.Separator()
 		if m.Item("Remove group").Chosen() {
-			p.pending = func() { _ = p.edit(func(c *store.Config) error { c.RemoveGroup(g.ID); return nil }) }
+			p.pending = func() { p.removeGroup(g.ID) }
 		}
 	})
 	chevron := "▸"
@@ -309,6 +309,11 @@ func (p *Panel) moveMenu(m *ui.Menu, h store.Host) {
 			p.pending = func() { p.move(h.ID, g.ID) }
 		}
 	}
+}
+
+// removeGroup deletes a group; its hosts and subgroups move to its parent.
+func (p *Panel) removeGroup(id string) {
+	_ = p.edit(func(c *store.Config) error { c.RemoveGroup(id); return nil })
 }
 
 // askRemove opens the confirmation for removing h.

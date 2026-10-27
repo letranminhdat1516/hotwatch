@@ -96,3 +96,25 @@ func TestHostSwitcherOpensHostsPage(t *testing.T) {
 		t.Fatalf("Hosts page not shown: %q", tt.Texts())
 	}
 }
+
+func TestHostSwitcherListsOtherHostsUnderTheirGroups(t *testing.T) {
+	cfg := store.Config{Version: 1,
+		Groups: []store.Group{{ID: "g-srv", Name: "Servers"}, {ID: "g-lab", Name: "Lab"}},
+		Hosts: []store.Host{
+			{ID: "mac", Name: "Mac", Kind: "local"},
+			{ID: "vps", Name: "VPS", Kind: "agent", Group: "g-srv"},
+			{ID: "box", Name: "agent-box", Kind: "agent", Group: "g-lab"},
+		}}
+	app := hwui.NewApp(func(string) hub.HostView { return hub.HostView{} }, cfg.Hosts, &hub.FakeRunner{}, func(string, string) {})
+	app.SetHostPanel(hostpanel.New(cfg, nil))
+	tt := ui.NewTester(app.View, 1400, 900)
+	if err := tt.Click("Mac"); err != nil {
+		t.Fatal(err)
+	}
+	texts := tt.Texts()
+	srv, vps := slices.Index(texts, "Servers"), slices.Index(texts, "VPS")
+	lab, box := slices.Index(texts, "Lab"), slices.Index(texts, "agent-box")
+	if srv < 0 || lab < 0 || !(srv < vps && lab < box) || (srv < lab) != (vps < box) {
+		t.Fatalf("hosts not under their group headings: %q", texts)
+	}
+}

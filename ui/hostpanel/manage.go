@@ -116,34 +116,66 @@ func (p *Panel) manageSection(c *ui.Context, g *store.Group, hosts []store.Host,
 		title, key = p.groupPath(*g), "ms:"+g.ID
 	}
 	ui.Column(c).Key(key).Gap(components.Grid).Children(func() {
+		// With no groups at all the page is one plain list.
+		if g == nil && len(p.cfg.Groups) == 0 {
+			p.hostList(c, hosts, selected, view, now)
+			return
+		}
 		ui.Row(c).Gap(components.Grid).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, title).FontSize(13).FontWeight(700).TextColor(t.TextMuted).Grow(1).SingleLine()
-			if g != nil {
-				grp := *g
-				ui.MenuButton(c, "•••", func(m *ui.Menu) {
-					if m.Item("Rename…").Chosen() {
-						p.pending = func() { p.group.rename(grp) }
-					}
-					if m.Item("New subgroup…").Chosen() {
-						p.pending = func() { p.group.open(grp.ID) }
-					}
-					m.Separator()
-					if m.Item("Remove group").Chosen() {
-						p.pending = func() { _ = p.edit(func(c *store.Config) error { c.RemoveGroup(grp.ID); return nil }) }
-					}
-				}).Label("Group actions " + grp.Name).Tooltip("Rename, add a subgroup or remove “" + grp.Name + "”")
+			heading := ui.Text(c, title).FontSize(13).FontWeight(700).TextColor(t.TextMuted).Grow(1).SingleLine()
+			if g == nil {
+				return
+			}
+			grp := *g
+			heading.ContextMenu(func(m *ui.Menu) {
+				if m.Item("Rename…").Chosen() {
+					p.pending = func() { p.group.rename(grp) }
+				}
+				if m.Item("New subgroup…").Chosen() {
+					p.pending = func() { p.group.open(grp.ID) }
+				}
+				m.Separator()
+				if m.Item("Remove group").Chosen() {
+					p.pending = func() { p.removeGroup(grp.ID) }
+				}
+			})
+			if ui.Button(c, "Rename…").Label("Rename " + grp.Name).Clicked() {
+				p.pending = func() { p.group.rename(grp) }
+			}
+			if ui.Button(c, "Remove group").Label("Remove group " + grp.Name).
+				Tooltip("Its hosts move up a level; no host is removed").Clicked() {
+				p.pending = func() { p.removeGroup(grp.ID) }
 			}
 		})
 		if len(hosts) == 0 {
 			ui.Text(c, "No hosts in this group.").FontSize(12).TextColor(t.TextMuted)
 			return
 		}
-		components.Surface(c, ui.Column(c).Gap(0).Padding(components.Grid/2)).Children(func() {
-			for _, h := range hosts {
-				p.manageRow(c, h, h.ID == selected, view(h.ID), now)
-			}
-		})
+		p.hostList(c, hosts, selected, view, now)
 	})
+}
+
+// hostList is a card with one row per host.
+func (p *Panel) hostList(c *ui.Context, hosts []store.Host, selected string, view func(string) hub.HostView, now time.Time) {
+	components.Surface(c, ui.Column(c).Gap(0).Padding(components.Grid/2)).Children(func() {
+		for _, h := range hosts {
+			p.manageRow(c, h, h.ID == selected, view(h.ID), now)
+		}
+	})
+}
+
+// GroupTitle names the group host id sits in, with its ancestors
+// ("Servers / Web"); "" when it is in none.
+func (p *Panel) GroupTitle(id string) string {
+	i := slices.IndexFunc(p.cfg.Hosts, func(h store.Host) bool { return h.ID == id })
+	if i < 0 {
+		return ""
+	}
+	j := slices.IndexFunc(p.cfg.Groups, func(g store.Group) bool { return g.ID == p.cfg.Hosts[i].Group })
+	if j < 0 {
+		return ""
+	}
+	return p.groupPath(p.cfg.Groups[j])
 }
 
 func (p *Panel) manageRow(c *ui.Context, h store.Host, selected bool, v hub.HostView, now time.Time) {
