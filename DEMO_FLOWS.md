@@ -18,3 +18,12 @@ Commands: `<grade all>` then `<agreement report>`
 ## Flow 3 — Needs-a-person queue
 URL: `<queue page>`
 1. `<answer id>` row → "<flag>: <why> (R..)"
+
+## Flow 4 — Manage hosts and read the connection log (app)
+Command: `make run` (or open Hotwatch.app), then sidebar → Hosts (or host switcher → Manage hosts…)
+1. Group headings "Local", "Servers" → "hosts by group, each with how it is reached (R27, R24)"
+2. "Edit…" on VPS → change Address → "Save" → "edit a host without a right-click menu (R27, R11)"
+3. "Move" on VPS → pick a group → "move between groups (R24)"
+4. "Remove…" on a test host → "Remove" in the dialog → "remove asks first (R27, R11)"
+5. "Connection log · VPS" → "time, state and reason of each connection change (R27)"
+6. Stop the VPS agent → an "Offline" line with the error appears → Retry → "Connecting", then "Online" (R27)

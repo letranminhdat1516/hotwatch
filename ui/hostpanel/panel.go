@@ -48,6 +48,8 @@ type Panel struct {
 		id, name string
 	}
 	hk hostKeyState
+
+	query string // the Hosts page's search
 }
 
 // New returns a panel editing cfg.
@@ -251,7 +253,7 @@ func (p *Panel) groupRow(c *ui.Context, g store.Group, depth int) {
 		}
 		m.Separator()
 		if m.Item("Remove group").Chosen() {
-			p.pending = func() { _ = p.edit(func(c *store.Config) error { c.RemoveGroup(g.ID); return nil }) }
+			p.pending = func() { p.removeGroup(g.ID) }
 		}
 	})
 	chevron := "▸"
@@ -290,20 +292,33 @@ func (p *Panel) hostMenu(m *ui.Menu, h store.Host) {
 	if m.Item("Edit…").Chosen() {
 		p.pending = func() { p.form.openEdit(h) }
 	}
-	m.Submenu("Move to group", func(m *ui.Menu) {
-		if m.Item("No group").Checked(h.Group == "").Chosen() {
-			p.pending = func() { p.move(h.ID, "") }
-		}
-		for _, g := range p.cfg.Groups {
-			if m.Item(p.groupPath(g)).Checked(h.Group == g.ID).Chosen() {
-				p.pending = func() { p.move(h.ID, g.ID) }
-			}
-		}
-	})
+	m.Submenu("Move to group", func(m *ui.Menu) { p.moveMenu(m, h) })
 	m.Separator()
 	if m.Item("Remove…").Disabled(h.Kind == "local").Chosen() {
-		p.pending = func() { p.removing.open, p.removing.id, p.removing.name = true, h.ID, h.Name }
+		p.pending = func() { p.askRemove(h) }
 	}
+}
+
+// moveMenu lists "No group" and every group, checking h's.
+func (p *Panel) moveMenu(m *ui.Menu, h store.Host) {
+	if m.Item("No group").Checked(h.Group == "").Chosen() {
+		p.pending = func() { p.move(h.ID, "") }
+	}
+	for _, g := range p.cfg.Groups {
+		if m.Item(p.groupPath(g)).Checked(h.Group == g.ID).Chosen() {
+			p.pending = func() { p.move(h.ID, g.ID) }
+		}
+	}
+}
+
+// removeGroup deletes a group; its hosts and subgroups move to its parent.
+func (p *Panel) removeGroup(id string) {
+	_ = p.edit(func(c *store.Config) error { c.RemoveGroup(id); return nil })
+}
+
+// askRemove opens the confirmation for removing h.
+func (p *Panel) askRemove(h store.Host) {
+	p.removing.open, p.removing.id, p.removing.name = true, h.ID, h.Name
 }
 
 // groupPath names a group with its ancestors: "Servers / Web".

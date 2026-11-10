@@ -24,6 +24,7 @@ type HostView struct {
 	ProcsErr error                   // last Processes fetch error, nil after a success; never affects Conn
 	CtrsErr  error                   // likewise for Containers
 	HostKey  *transport.HostKeyError // set in HostKeyUnknown / HostKeyMismatch
+	Log      []LogEntry              // connection log, oldest first; never mutated after publish
 }
 
 // Poll periods for hosts that are not the selected one.
@@ -68,7 +69,7 @@ func New(sources map[string]source.Source, interval time.Duration, publish func(
 		visible: map[string]bool{}, hosts: map[string]*host{}}
 	h.mu.Lock()
 	for id, src := range sources {
-		h.spawnLocked(id, src, NewHistory())
+		h.spawnLocked(id, src, NewHistory(), nil)
 	}
 	h.mu.Unlock()
 	return h
@@ -76,10 +77,10 @@ func New(sources map[string]source.Source, interval time.Duration, publish func(
 
 // spawnLocked starts the poller goroutine for id. h.mu must be held and the
 // hub not stopped.
-func (h *Hub) spawnLocked(id string, src source.Source, hist *History) {
+func (h *Hub) spawnLocked(id string, src source.Source, hist *History, log []LogEntry) {
 	ctx, cancel := context.WithCancel(h.ctx)
 	p := &host{id: id, src: src, ctx: ctx, cancel: cancel, done: make(chan struct{}),
-		wake: make(chan struct{}, 1), hist: hist}
+		wake: make(chan struct{}, 1), hist: hist, log: log}
 	h.hosts[id] = p
 	h.wg.Add(1)
 	go func() {
@@ -99,7 +100,7 @@ func (h *Hub) AddHost(id string, src source.Source) {
 	if h.stopped || h.hosts[id] != nil {
 		return
 	}
-	h.spawnLocked(id, src, NewHistory())
+	h.spawnLocked(id, src, NewHistory(), nil)
 }
 
 // RemoveHost stops polling id and waits for its goroutine to exit; its
@@ -118,7 +119,7 @@ func (h *Hub) RemoveHost(id string) {
 }
 
 // ReplaceSource swaps id's source (after an address or token edit). The
-// history is kept; the connection restarts at Connecting.
+// history and connection log are kept; the connection restarts at Connecting.
 func (h *Hub) ReplaceSource(id string, src source.Source) {
 	h.editMu.Lock()
 	defer h.editMu.Unlock()
@@ -133,7 +134,7 @@ func (h *Hub) ReplaceSource(id string, src source.Source) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.stopped {
-		h.spawnLocked(id, src, old.hist)
+		h.spawnLocked(id, src, old.hist, old.log)
 	}
 }
 

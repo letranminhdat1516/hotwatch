@@ -47,7 +47,7 @@ func TestCmdNumbersFollowVisiblePages(t *testing.T) {
 	tt, rec := navApp(t)
 	tt.Key(ui.Cmd|ui.Alt, ui.KeyDown) // VPS: no GPU, Energy
 	*rec = nil
-	// Overview Processes CPU Memory Disk Network Docker Settings
+	// Overview Processes CPU Memory Disk Network Docker Hosts Settings
 	tt.Key(ui.Cmd, ui.Key6)
 	if got := lastNav(*rec); got != (navRec{"vps", "network"}) {
 		t.Fatalf("⌘6 on the VPS: %v", *rec)
@@ -55,10 +55,9 @@ func TestCmdNumbersFollowVisiblePages(t *testing.T) {
 	if count(tt, "Energy") != 0 {
 		t.Fatalf("Energy shown on the VPS: %q", tt.Texts())
 	}
-	n := len(*rec)
-	tt.Key(ui.Cmd, ui.Key9) // only 8 visible pages: nothing
-	if len(*rec) != n {
-		t.Fatalf("⌘9 selected %v", *rec)
+	tt.Key(ui.Cmd, ui.Key9) // the ninth visible page
+	if got := lastNav(*rec); got != (navRec{"vps", "settings"}) {
+		t.Fatalf("⌘9 on the VPS: %v", *rec)
 	}
 }
 

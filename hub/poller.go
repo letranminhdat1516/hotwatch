@@ -49,6 +49,7 @@ type host struct {
 	polled   bool
 	lastPoll time.Time
 	procsAt  time.Time // last process fetch; paces the off-page refresh
+	log      []LogEntry
 }
 
 func (p *host) poke() {
@@ -104,6 +105,7 @@ func (h *Hub) due(p *host, t tier, force bool, now time.Time) (at time.Time, ok 
 
 func (h *Hub) run(p *host) {
 	p.conn = Conn{State: Connecting}
+	p.note("Connecting", time.Now())
 	h.emit(p)
 	for p.ctx.Err() == nil {
 		h.mu.Lock()
@@ -112,6 +114,7 @@ func (h *Hub) run(p *host) {
 		h.mu.Unlock()
 		if reset {
 			p.conn = p.conn.Next(EvReset, time.Now())
+			p.note("Retrying", time.Now())
 			p.hostKey = nil
 			p.polled = false
 			h.emit(p)
@@ -183,6 +186,7 @@ func (h *Hub) poll(p *host, t tier, page string) {
 	p.snap = &snap
 	p.hist.Push(snap.Time, snap)
 	p.conn = p.conn.Next(EvOK, now)
+	p.note("", now)
 	p.hostKey = nil
 
 	// Publish the snapshot now; page data may be slow.
@@ -231,7 +235,9 @@ func (h *Hub) poll(p *host, t tier, page string) {
 
 func (h *Hub) fail(p *host, err error) {
 	ev := Classify(err)
-	p.conn = p.conn.Next(ev, time.Now())
+	now := time.Now()
+	p.conn = p.conn.Next(ev, now)
+	p.note(err.Error(), now)
 	switch ev {
 	case EvHostKeyUnknown, EvHostKeyMismatch:
 		var hk *transport.HostKeyError
@@ -246,7 +252,7 @@ func (h *Hub) emit(p *host) {
 	if p.ctx.Err() != nil {
 		return
 	}
-	v := HostView{Info: p.info, Conn: p.conn, Snap: p.snap, Hist: p.hist, Procs: p.procs, Ctrs: p.ctrs, ProcsErr: p.procsErr, CtrsErr: p.ctrsErr, HostKey: p.hostKey}
+	v := HostView{Info: p.info, Conn: p.conn, Snap: p.snap, Hist: p.hist, Procs: p.procs, Ctrs: p.ctrs, ProcsErr: p.procsErr, CtrsErr: p.ctrsErr, HostKey: p.hostKey, Log: p.log}
 	if !p.conn.LastOK.IsZero() {
 		v.Age = time.Now().Sub(p.conn.LastOK)
 	}

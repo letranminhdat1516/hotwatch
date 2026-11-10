@@ -48,6 +48,7 @@ var groups = []group{
 		{Key: "apps", Title: "Apps", icon: icons.Apps, needs: func(c model.Caps) bool { return c.Apps }},
 		{Key: "packages", Title: "Packages", icon: icons.Packages, needs: func(c model.Caps) bool { return c.Packages }},
 		{Key: "about", Title: "About This Mac", icon: icons.Info, needs: func(c model.Caps) bool { return c.Apps }},
+		{Key: "hosts", Title: "Hosts", icon: icons.Host},
 		{Key: "settings", Title: "Settings", icon: icons.Settings},
 	}},
 }
@@ -303,6 +304,9 @@ func navValue(page string, s *model.Snapshot) string {
 	return ""
 }
 
+// hostGrouper is a host panel that knows which group each host is in.
+type hostGrouper interface{ GroupTitle(hostID string) string }
+
 // hostSwitcher is the bottom block: the current host, and on click an inline
 // list of the other hosts to switch to.
 func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
@@ -310,9 +314,26 @@ func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
 	cur, _ := a.host()
 	ui.Column(c).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Padding(components.Grid).Gap(2).Children(func() {
 		if a.hostMenuOpen {
-			for _, h := range a.hosts {
-				if h.ID == a.selected {
+			grouper, _ := a.panel.(hostGrouper)
+			heading := ""
+			for _, id := range a.hostOrder() {
+				i := slices.IndexFunc(a.hosts, func(h store.Host) bool { return h.ID == id })
+				if id == a.selected || i < 0 {
 					continue
+				}
+				h := a.hosts[i]
+				// A heading each time the list enters another group.
+				if grouper != nil {
+					// Loose hosts come after the groups; "No group" keeps
+					// them from reading as part of the last one.
+					if g := grouper.GroupTitle(id); g != heading {
+						heading = g
+						if g == "" {
+							g = "No group"
+						}
+						ui.Text(c, g).Key("hs-g-"+g).FontSize(11).FontWeight(600).TextColor(t.TextMuted).
+							SingleLine().Padding(components.Grid, components.Grid, 2, components.Grid)
+					}
 				}
 				item := ui.Row(c).Key("hs-"+h.ID).AlignItems(ui.Center).Gap(components.Grid).
 					Padding(6, components.Grid).Radius(components.Grid)
@@ -344,6 +365,19 @@ func (a *App) hostSwitcher(c *ui.Context, v hub.HostView, now time.Time) {
 				add.Children(func() {
 					ui.Text(c, "+").FontSize(13).FontWeight(600).TextColor(t.Accent).Width(8)
 					ui.Text(c, "Add host…").FontSize(13).TextColor(t.Accent).SingleLine().Grow(1)
+				})
+				manage := ui.Row(c).Key("hs-manage").AlignItems(ui.Center).Gap(components.Grid).
+					Padding(6, components.Grid).Radius(components.Grid)
+				if manage.Hovered() {
+					manage.Background(t.SurfaceHover)
+				}
+				if manage.Clicked() {
+					a.hostMenuOpen = false
+					a.setPage("hosts")
+				}
+				manage.Children(func() {
+					components.Glyph(c, icons.Host, 12, t.TextMuted)
+					ui.Text(c, "Manage hosts…").FontSize(13).SingleLine().Grow(1)
 				})
 			}
 		}

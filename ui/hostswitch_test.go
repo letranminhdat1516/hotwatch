@@ -65,3 +65,56 @@ func TestHostSwitcherWithoutPanelOnlySwitches(t *testing.T) {
 		t.Fatalf("did not switch to VPS: %q", tt.Texts())
 	}
 }
+
+func TestHostsPageInSidebarManagesHosts(t *testing.T) {
+	tt := ui.NewTester(switcherApp(true).View, 1400, 900)
+	if err := tt.Click("Hosts"); err != nil {
+		t.Fatalf("%v (texts %q)", err, tt.Texts())
+	}
+	for _, s := range []string{"New host", "Edit VPS", "Remove VPS", "Connection log · Mac"} {
+		if _, ok := tt.Find(s); !ok {
+			t.Fatalf("missing %q on the Hosts page: %q", s, tt.Texts())
+		}
+	}
+	if err := tt.Click("Edit VPS"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(tt.Texts(), "Edit host") {
+		t.Fatalf("edit form not open: %q", tt.Texts())
+	}
+}
+
+func TestHostSwitcherOpensHostsPage(t *testing.T) {
+	tt := ui.NewTester(switcherApp(true).View, 1400, 900)
+	if err := tt.Click("Mac"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("Manage hosts…"); err != nil {
+		t.Fatalf("%v (texts %q)", err, tt.Texts())
+	}
+	if _, ok := tt.Find("Edit VPS"); !ok {
+		t.Fatalf("Hosts page not shown: %q", tt.Texts())
+	}
+}
+
+func TestHostSwitcherListsOtherHostsUnderTheirGroups(t *testing.T) {
+	cfg := store.Config{Version: 1,
+		Groups: []store.Group{{ID: "g-srv", Name: "Servers"}, {ID: "g-lab", Name: "Lab"}},
+		Hosts: []store.Host{
+			{ID: "mac", Name: "Mac", Kind: "local"},
+			{ID: "vps", Name: "VPS", Kind: "agent", Group: "g-srv"},
+			{ID: "box", Name: "agent-box", Kind: "agent", Group: "g-lab"},
+		}}
+	app := hwui.NewApp(func(string) hub.HostView { return hub.HostView{} }, cfg.Hosts, &hub.FakeRunner{}, func(string, string) {})
+	app.SetHostPanel(hostpanel.New(cfg, nil))
+	tt := ui.NewTester(app.View, 1400, 900)
+	if err := tt.Click("Mac"); err != nil {
+		t.Fatal(err)
+	}
+	texts := tt.Texts()
+	srv, vps := slices.Index(texts, "Servers"), slices.Index(texts, "VPS")
+	lab, box := slices.Index(texts, "Lab"), slices.Index(texts, "agent-box")
+	if srv < 0 || lab < 0 || !(srv < vps && lab < box) || (srv < lab) != (vps < box) {
+		t.Fatalf("hosts not under their group headings: %q", texts)
+	}
+}

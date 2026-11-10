@@ -19,6 +19,7 @@ import (
 	"hotwatch/model"
 	"hotwatch/store"
 	hwui "hotwatch/ui"
+	"hotwatch/ui/hostpanel"
 )
 
 func fp(v float64) *float64 { return &v }
@@ -136,9 +137,12 @@ func main() {
 	}
 	hosts := []store.Host{
 		{ID: "local", Name: "This Mac", Kind: "local", Group: "g-local"},
-		{ID: "agent-box", Name: "agent-box", Kind: "agent", Group: "g-compute"},
-		{ID: "vps", Name: "VPS (dat)", Kind: "agent", Group: "g-public"},
+		{ID: "agent-box", Name: "agent-box", Kind: "agent", Group: "g-compute",
+			Conn: &store.Conn{Type: "direct", Address: "100.101.7.12", AgentPort: 7171}},
+		{ID: "vps", Name: "VPS (dat)", Kind: "agent", Group: "g-public",
+			Conn: &store.Conn{Type: "ssh", SSHHost: "167.253.157.57", SSHPort: 22, SSHUser: "dat", AgentPort: 7171}},
 	}
+	groups := []store.Group{{ID: "g-local", Name: "Local"}, {ID: "g-compute", Name: "Lab"}, {ID: "g-public", Name: "Servers"}}
 	views := map[string]hub.HostView{
 		"local":     mkView("darwin", model.Caps{GPU: true, Battery: true, Processes: true, Apps: true, Packages: true}, macSnap()),
 		"agent-box": mkView("linux", model.Caps{GPU: true, Docker: true, Processes: true}, boxSnap()),
@@ -164,7 +168,18 @@ func main() {
 		{PID: 7, Name: "launchd", RSS: 20 << 20, User: "root", CPUPct: 0.2, Threads: 4},
 	}
 	views["local"] = lv
+	now := time.Now()
+	vv := views["vps"]
+	vv.Log = []hub.LogEntry{
+		{Time: now.Add(-3 * time.Hour), State: hub.Connecting, Detail: "Connecting"},
+		{Time: now.Add(-3*time.Hour + 2*time.Second), State: hub.Online},
+		{Time: now.Add(-40 * time.Minute), State: hub.Stale, Detail: "unavailable: ssh: connect to 167.253.157.57:22: i/o timeout"},
+		{Time: now.Add(-39 * time.Minute), State: hub.Offline, Detail: "unavailable: ssh: connect to 167.253.157.57:22: i/o timeout"},
+		{Time: now.Add(-35 * time.Minute), State: hub.Online},
+	}
+	views["vps"] = vv
 	a := hwui.NewApp(func(id string) hub.HostView { return views[id] }, hosts, nil, func(string, string) {})
+	a.SetHostPanel(hostpanel.New(store.Config{Version: 1, Groups: groups, Hosts: hosts}, nil))
 	a.SelectForShot(sel, page)
 	a.SetSettings(store.Settings{IntervalMs: 2000})
 	// Lucide line icons, as the app draws them.

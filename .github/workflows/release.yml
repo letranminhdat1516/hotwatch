@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  agent:
+    name: agent (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ""
+          - goos: linux
+            goarch: arm64
+            ext: ""
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: windows
+            goarch: arm64
+            ext: .exe
+          - goos: freebsd
+            goarch: amd64
+            ext: ""
+          - goos: darwin
+            goarch: amd64
+            ext: ""
+          - goos: darwin
+            goarch: arm64
+            ext: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build hotwatch-agent
+        run: |
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${{ github.ref_name }}" \
+            -o hotwatch-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} \
+            ./cmd/hotwatch-agent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: hotwatch-agent-*
+
+  app:
+    name: app (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - platform: darwin/arm64
+            runner: macos-latest
+          - platform: darwin/amd64
+            runner: macos-latest
+          - platform: windows/amd64
+            runner: ubuntu-latest
+          - platform: windows/arm64
+            runner: ubuntu-latest
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build Hotwatch app
+        run: go tool mygo build -platform ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.platform == 'darwin/arm64' && 'darwin-arm64' || matrix.platform == 'darwin/amd64' && 'darwin-amd64' || matrix.platform == 'windows/amd64' && 'windows-amd64' || matrix.platform == 'windows/arm64' && 'windows-arm64' || matrix.platform == 'linux/amd64' && 'linux-amd64' || 'linux-arm64' }}
+          path: dist/
+
+  release:
+    name: Create release
+    needs: [agent, app]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          # Agent binaries
+          for d in artifacts/agent-*; do
+            cp "$d"/hotwatch-agent-* release/
+          done
+          # App archives — tar.gz directories, zip Windows .exe
+          for d in artifacts/app-*; do
+            platform=$(basename "$d" | sed 's/^app-//')
+            case "$platform" in
+              darwin-*)
+                if [ -d "$d/darwin-arm64" ]; then
+                  tar czf "release/Hotwatch-darwin-arm64.tar.gz" -C "$d/darwin-arm64" .
+                fi
+                if [ -d "$d/darwin-amd64" ]; then
+                  tar czf "release/Hotwatch-darwin-amd64.tar.gz" -C "$d/darwin-amd64" .
+                fi
+                ;;
+              windows-*)
+                for wd in "$d"/windows-*; do
+                  arch=$(basename "$wd" | sed 's/windows-//')
+                  (cd "$wd" && zip -r "../../release/Hotwatch-windows-${arch}.zip" .)
+                done
+                ;;
+              linux-*)
+                for ld in "$d"/linux-*; do
+                  arch=$(basename "$ld" | sed 's/linux-//')
+                  # Include .deb if present
+                  for deb in "$ld"/*.deb; do
+                    [ -f "$deb" ] && cp "$deb" release/
+                  done
+                  tar czf "release/Hotwatch-linux-${arch}.tar.gz" -C "$ld" .
+                done
+                ;;
+            esac
+          done
+          ls -lh release/
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" release/* \
+            --title "Hotwatch ${{ github.ref_name }}" \
+            --generate-notes
