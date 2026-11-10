@@ -115,7 +115,7 @@ jobs:
               windows-*)
                 for wd in "$d"/windows-*; do
                   arch=$(basename "$wd" | sed 's/windows-//')
-                  (cd "$wd" && zip -r "../../release/Hotwatch-windows-${arch}.zip" .)
+                    zip -rj "release/Hotwatch-windows-${arch}.zip" "$wd"
                 done
                 ;;
               linux-*)
