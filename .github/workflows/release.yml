@@ -78,7 +78,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build Hotwatch app
-        run: go tool mygo build -platform ${{ matrix.platform }}
+        run: go tool mygo build -platform ${{ matrix.platform }} -sign=-
       - uses: actions/upload-artifact@v4
         with:
           name: app-${{ matrix.platform == 'darwin/arm64' && 'darwin-arm64' || matrix.platform == 'darwin/amd64' && 'darwin-amd64' || matrix.platform == 'windows/amd64' && 'windows-amd64' || matrix.platform == 'windows/arm64' && 'windows-arm64' || matrix.platform == 'linux/amd64' && 'linux-amd64' || 'linux-arm64' }}
